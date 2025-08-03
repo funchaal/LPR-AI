@@ -1,5 +1,5 @@
 {
-  "plate_detection_model": "models/plate/openvino/fine_tuned_plate_detector_openvino_model/",
+  "plate_detection_model": "models/plate/openvino/fine_tuned_plate_detector_3_openvino_model/",
   "ocr_recognition_model": "models/ocr/rec/en/en_PP-OCRv3_rec_infer/",
   "ocr_detection_model": "models/ocr/det/en/en_PP-OCRv3_det_infer/",
   "ocr_classification_model": "models/ocr/cls/ch_ppocr_mobile_v2.0_cls_infer/",

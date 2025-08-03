@@ -170,32 +170,48 @@ class PlateObject:
         if not frames:
             return None
 
-        mid_index = len(frames) // 2
-        central_frame = frames[mid_index]
+        best_frame = None
+        min_distance = float('inf')
 
-        plate_frame = central_frame['inputFrame'].copy()  # copia para não alterar o original
-        x1, y1, x2, y2 = central_frame['plateBoundingBox']
+        for frame in frames:
+            x1, y1, x2, y2 = frame['plateBoundingBox']
+            bbox_center_x = (x1 + x2) / 2
+            bbox_center_y = (y1 + y2) / 2
 
-        # Desenha a bounding box na imagem
+            height, width = frame['inputFrame'].shape[:2]
+            image_center_x = width / 2
+            image_center_y = height / 2
+
+            distance = ((bbox_center_x - image_center_x) ** 2 + (bbox_center_y - image_center_y) ** 2) ** 0.5
+
+            if distance < min_distance:
+                min_distance = distance
+                best_frame = frame
+
+        if best_frame is None:
+            return None
+
+        plate_frame = best_frame['inputFrame'].copy()
+        x1, y1, x2, y2 = best_frame['plateBoundingBox']
+
+        # Desenha a bounding box
         cv2.rectangle(plate_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-        # Texto para colocar (a placa final)
         text = self.finalReading if self.finalReading else "N/A"
-
-        # Posição do texto: acima da caixa
         text_pos = (x1, max(y1 - 10, 10))
 
-        # Desenha o retângulo de fundo do texto para melhorar a visibilidade
         (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-        cv2.rectangle(plate_frame, 
-                    (text_pos[0], text_pos[1] - text_height - baseline),
-                    (text_pos[0] + text_width, text_pos[1] + baseline), 
-                    (0, 255, 0), cv2.FILLED)
+        cv2.rectangle(
+            plate_frame,
+            (text_pos[0], text_pos[1] - text_height - baseline),
+            (text_pos[0] + text_width, text_pos[1] + baseline),
+            (0, 255, 0), cv2.FILLED
+        )
 
-        # Escreve o texto
         cv2.putText(plate_frame, text, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
         return plate_frame
+
 
     def definePossibleReadings(self, plates):
         plate_pontuation = defaultdict(int)
