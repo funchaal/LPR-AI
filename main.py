@@ -83,10 +83,10 @@ def main(instance, input_name, input_endpoint):
                 if prediction and prediction[0]:
                     plate_text, score = choose_best_ocr_prediction(prediction[0])
 
-                    if PlateObject.processes.get(instance) is None:
-                        PlateObject.processes[instance] = PlateObject(instance)
+                    if PlateObject.instances.get(instance) is None:
+                        PlateObject.instances[instance] = PlateObject(instance)
 
-                    PlateObject.processes[instance].addCapture(
+                    PlateObject.instances[instance].addCapture(
                         str(re.sub(r'[^a-zA-Z0-9]', '', plate_text)).upper(),
                         {'inputFrame': frame, 'plateBoundingBox': [x1, y1, x2, y2]}
                     )

@@ -81,8 +81,40 @@ class PlateObject:
 
 
     def close(self):
-        self.chooseBestFrame(self.frames)
         logging.info(f"Placa {self.id} finalizada com leitura: {self.finalReading}")
+
+        best_frame = self.chooseBestFrame(self.frames)
+        captures_save_path = self.__class__.captures_save_path
+
+        try:
+            if captures_save_path is not None:
+                # Pegando a pasta pai do captures_save_path
+                base_folder = os.path.dirname(captures_save_path)
+
+                # Data atual
+                now = datetime.now()
+                year = str(now.year)
+                month = f"{now.month:02d}"  # mês com zero à esquerda
+                day = f"{now.day:02d}"
+
+                # Monta o caminho completo: base_folder/ano/mes/dia
+                folder_path = os.path.join(base_folder, year, month, day)
+
+                # Cria as pastas, se não existirem
+                os.makedirs(folder_path, exist_ok=True)
+
+                # Nome do arquivo a partir do captures_save_path original
+                filename = os.path.basename(f"{self.id}.jpg")
+
+                # Caminho final com pasta ano/mes/dia
+                final_path = os.path.join(folder_path, filename)
+
+                # Salva a imagem no caminho final
+                cv2.imwrite(final_path, best_frame)
+
+                logging.info(f"Captura salva para placa {self.finalReading}")
+        except Exception as e:
+            logging.error(f"Erro ao salvar captura: {e}")
 
         try:
             cursor = self.__class__.db_connection.cursor()
@@ -137,8 +169,6 @@ class PlateObject:
     def chooseBestFrame(self, frames):
         if not frames:
             return None
-        
-        save_path = self.__class__.captures_save_path
 
         mid_index = len(frames) // 2
         central_frame = frames[mid_index]
@@ -165,32 +195,7 @@ class PlateObject:
         # Escreve o texto
         cv2.putText(plate_frame, text, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
-        if save_path is not None:
-            # Pegando a pasta pai do save_path
-            base_folder = os.path.dirname(save_path)
-
-            # Data atual
-            now = datetime.now()
-            year = str(now.year)
-            month = f"{now.month:02d}"  # mês com zero à esquerda
-            day = f"{now.day:02d}"
-
-            # Monta o caminho completo: base_folder/ano/mes/dia
-            folder_path = os.path.join(base_folder, year, month, day)
-
-            # Cria as pastas, se não existirem
-            os.makedirs(folder_path, exist_ok=True)
-
-            # Nome do arquivo a partir do save_path original
-            filename = os.path.basename(f"{self.id}.jpg")
-
-            # Caminho final com pasta ano/mes/dia
-            final_path = os.path.join(folder_path, filename)
-
-            # Salva a imagem no caminho final
-            cv2.imwrite(final_path, plate_frame)
-
-        return
+        return plate_frame
 
     def definePossibleReadings(self, plates):
         plate_pontuation = defaultdict(int)
