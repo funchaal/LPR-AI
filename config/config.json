@@ -1,0 +1,17 @@
+{
+  "plate_detection_model": "models/plate/openvino/fine_tuned_plate_detector_openvino_model/",
+  "ocr_recognition_model": "models/ocr/rec/en/en_PP-OCRv3_rec_infer/",
+  "ocr_detection_model": "models/ocr/det/en/en_PP-OCRv3_det_infer/",
+  "ocr_classification_model": "models/ocr/cls/ch_ppocr_mobile_v2.0_cls_infer/",
+  "use_angle_cls": false,
+  "use_openvino": true,
+  "input_sources": {
+    "RTG01": {
+      "instance": "RTG01", 
+      "input_endpoint": "test_content/plate video.mp4"
+    }
+  },
+  "db_connection": "../db/captures.db",
+  "captures_save_path": "../captures/",
+  "logging_path": "log/"
+}

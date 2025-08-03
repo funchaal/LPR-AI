@@ -1,0 +1,19 @@
+description: Ultralytics besttrained model trained on /content/data.yaml
+author: Ultralytics
+date: '2025-04-06T19:05:50.221084'
+version: 8.3.63
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: license
+args:
+  batch: 1
+  half: false
+  int8: false
+  dynamic: false
