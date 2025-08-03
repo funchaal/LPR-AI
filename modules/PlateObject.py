@@ -147,6 +147,7 @@ class PlateObject:
         finally:
             del self.__class__.instances[self.instanceId]
 
+    
     def addCapture(self, reading, frame):
         self.readings[reading] += 1
         self.frames.append(frame)

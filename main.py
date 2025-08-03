@@ -82,6 +82,10 @@ def main(instance, input_name, input_endpoint):
 
                 if prediction and prediction[0]:
                     plate_text, score = choose_best_ocr_prediction(prediction[0])
+                # if prediction:
+                #     # Quando `det=False`, o retorno é direto: [[('ABC1234', 0.98)]]
+                #     best_result = prediction[0][0]  # Pega o primeiro item
+                #     plate_text, score = best_result
 
                     if PlateObject.instances.get(instance) is None:
                         PlateObject.instances[instance] = PlateObject(instance)
