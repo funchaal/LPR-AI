@@ -215,14 +215,17 @@ class PlateObject:
 
     def definePossibleReadings(self, plates):
         plate_pontuation = defaultdict(int)
-        for plate in plates.keys():
-            for i in range(2, len(plate)):
-                for j in range(len(plate) - i + 1):
-                    substring = plate[j:j + i]
-                    for reading, count in self.readings.items():
-                        if substring in reading:
-                            plate_pontuation[plate] += count
-        
-        top_plates = sorted(plate_pontuation, key=plate_pontuation.get, reverse=True)[:2]
 
+        for plate in plates.keys():
+            substrings = set(
+                plate[j:j + i]
+                for i in range(2, len(plate))
+                for j in range(len(plate) - i + 1)
+            )
+            for substring in substrings:
+                for reading, count in self.readings.items():
+                    if substring in reading:
+                        plate_pontuation[plate] += count
+
+        top_plates = sorted(plate_pontuation, key=plate_pontuation.get, reverse=True)[:2]
         return top_plates
