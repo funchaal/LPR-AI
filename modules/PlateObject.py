@@ -13,13 +13,13 @@ from numpy import save
 class PlateObject:
 
     limiar = 1.5
-    processes = {}
-    api = lambda process, readings: None  # Placeholder for API function
+    instances = {}
+    api = lambda instance, readings: None  # Placeholder for API function
 
-    def __init__(self, process_id):
+    def __init__(self, instance_id):
         self.start_time = datetime.now()
         self.id = str(uuid.uuid4())
-        self.processId = process_id
+        self.instanceId = instance_id
         self.closed = False
         self.readings = defaultdict(int)
         self.possibleReadings = []
@@ -32,7 +32,7 @@ class PlateObject:
         return f'({self.id}) possible plates: {self.possibleReadings}, final plate: {self.finalReading}'
     
     @classmethod
-    def setup(cls, db_connection, captures_save_path, api=lambda process, readings: None):
+    def setup(cls, db_connection, captures_save_path, api=lambda instance, readings: None):
         cls.db_connection = sqlite3.connect(db_connection)
         cls.captures_save_path = captures_save_path
         cls.api = api
@@ -40,7 +40,7 @@ class PlateObject:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS placas (
                 id TEXT PRIMARY KEY,
-                process_id TEXT,
+                instance_id TEXT,
                 final_plate TEXT,
                 timestamp TEXT,
                 imagem_path TEXT,
@@ -51,33 +51,33 @@ class PlateObject:
         cls.db_connection.commit()
 
     @classmethod
-    def newFrame(cls, process_id):
-        process = cls.processes.get(process_id)
-        if not process:
+    def newFrame(cls, instance_id):
+        instance = cls.instances.get(instance_id)
+        if not instance:
             return
 
-        process.noFrameCount += 1
+        instance.noFrameCount += 1
 
-        if process.noFrameCount > 5:
-            process.closed = True
-            logging.info(f"Process {process_id} closed due to inactivity")
-            process.finalReading = process.definePossibleReadings(process.readings)[0]
+        if instance.noFrameCount > 5:
+            instance.closed = True
+            logging.info(f"instance {instance_id} closed due to inactivity")
+            instance.finalReading = instance.definePossibleReadings(instance.readings)[0]
 
             print("📸 Leituras registradas até o momento:")
-            print(process.readings)
+            print(instance.readings)
 
             print("🔍 Placas possíveis identificadas:")
-            print(process.possibleReadings)
+            print(instance.possibleReadings)
 
-            print("✅ Placa final escolhida para o processo:")
-            print(process.finalReading)
+            print("✅ Placa final escolhida para o instanceo:")
+            print(instance.finalReading)
 
             print('timestamp: ', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-            duration = datetime.now() - process.start_time
-            print(f"⏱️ Processamento da placa {process.finalReading} levou {duration.total_seconds():.2f} segundos.")
+            duration = datetime.now() - instance.start_time
+            print(f"⏱️ instanceamento da placa {instance.finalReading} levou {duration.total_seconds():.2f} segundos.")
 
-            process.close()
+            instance.close()
 
 
     def close(self):
@@ -94,11 +94,11 @@ class PlateObject:
 
             cursor.execute('''
                 INSERT OR REPLACE INTO placas 
-                (id, process_id, final_plate, timestamp, imagem_path, readings_json, possible_plates_json)
+                (id, instance_id, final_plate, timestamp, imagem_path, readings_json, possible_plates_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 self.id,
-                self.processId,
+                self.instanceId,
                 self.finalReading,
                 timestamp,
                 imagem_path,
@@ -113,7 +113,7 @@ class PlateObject:
             logging.error(f"Erro ao salvar no banco SQLite: {e}")
 
         finally:
-            del self.__class__.processes[self.processId]
+            del self.__class__.instances[self.instanceId]
 
     def addCapture(self, reading, frame):
         self.readings[reading] += 1
@@ -132,7 +132,7 @@ class PlateObject:
             for idx, plate in new_possible_plates:
                 self.possibleReadings.insert(idx, plate)
 
-            self.__class__.api(process=self.processId, readings=[plate for idx, plate in new_possible_plates])
+            self.__class__.api(instance=self.instanceId, readings=[plate for idx, plate in new_possible_plates])
 
     def chooseBestFrame(self, frames):
         if not frames:
