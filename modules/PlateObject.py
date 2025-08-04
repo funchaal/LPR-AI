@@ -14,6 +14,8 @@ class PlateObject:
 
     limiar = 1.5
     instances = {}
+    suspect_detections = []
+    suspect_detections_save_path = None
     api = lambda instance, readings: None  # Placeholder for API function
 
     def __init__(self, instance_id):
@@ -79,12 +81,41 @@ class PlateObject:
 
             instance.close()
 
+    @classmethod
+    def save_suspect_detections(cls):
+        if not cls.suspect_detections:
+            return
+        
+        os.makedirs(cls.suspect_detections_save_path, exist_ok=True)
+
+        for detection in cls.suspect_detections:
+            frame_id = detection["frame_id"]
+            frame = detection["frame"]
+            x1, y1, x2, y2 = detection["coords"]
+            tipo = detection["type"]
+
+            # Recorta a imagem com base nas coordenadas
+            cropped = frame[y1:y2, x1:x2]
+
+            # Formata o nome do arquivo
+            filename = f"{frame_id} {x1}-{y1}-{x2}-{y2} {tipo}.jpg"
+            filepath = os.path.join(cls.suspect_detections_save_path, filename)
+
+            # Salva a imagem
+            cv2.imwrite(filepath, cropped)
+        
+        logging.info(f"Detecções suspeitas salvas com sucesso.")
 
     def close(self):
         logging.info(f"Placa {self.id} finalizada com leitura: {self.finalReading}")
 
         best_frame = self.chooseBestFrame(self.frames)
         captures_save_path = self.__class__.captures_save_path
+
+        try:
+            self.__class__.save_suspect_detections()
+        except Exception as e:
+            logging.error(f"Erro ao salvar detecções suspeitas: {e}")
 
         try:
             if captures_save_path is not None:

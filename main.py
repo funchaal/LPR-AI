@@ -6,6 +6,8 @@ import cv2
 import logging
 import numpy as np
 
+import uuid
+
 from modules.detector import load_yolo
 from modules.ocr import init_ocr
 
@@ -23,7 +25,7 @@ from modules.PlateObject import PlateObject
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-CONFIG_PATH = 'config/config.json'
+CONFIG_PATH = '/config/config.json'
 config = load_config(CONFIG_PATH)
 
 LOG_PATH = config["logging_path"]
@@ -42,6 +44,7 @@ USE_OPENVINO = config["use_openvino"]
 USE_DETECTION = config["use_detection"]
 
 SAVE_SUSPECT_DETECTIONS = config["save_suspect_detections"]
+SUSPECT_DETECTIONS_SAVE_PATH = config.get("suspect_detections_save_path")
 
 def main(instance, input_name, input_endpoint):
     model = load_yolo(PLATE_MODEL_PATH)
@@ -58,7 +61,7 @@ def main(instance, input_name, input_endpoint):
 
     logging.info("Iniciando captura de vídeo")
 
-    PlateObject.setup(db_connection=DB_CONNECTION, captures_save_path=CAPTURES_SAVE_PATH)
+    PlateObject.setup(db_connection=DB_CONNECTION, captures_save_path=CAPTURES_SAVE_PATH, suspect_detections_save_path=SUSPECT_DETECTIONS_SAVE_PATH)
 
     while True:
         frame = get_frame(source_type, cap, input_endpoint)
@@ -75,6 +78,8 @@ def main(instance, input_name, input_endpoint):
 
         results = model.predict(frame, verbose=False)
 
+        frame_id = None
+
         if results[0].boxes is not None and len(results[0].boxes) > 0:
             objects = results[0].boxes.data.tolist()
 
@@ -82,6 +87,14 @@ def main(instance, input_name, input_endpoint):
                 x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
 
                 if not validate_bounding_box(x1, y1, x2, y2):
+                    if SAVE_SUSPECT_DETECTIONS:
+                        frame_id = str(uuid.uuid4())
+                        PlateObject.suspect_detections.append({ 
+                            "frame_id": frame_id, 
+                            "frame": frame, 
+                            "coords": [x1, y1, x2, y2], 
+                            "type": 1
+                         })
                     continue
 
                 plate_crop = frame[y1:y2, x1:x2]
@@ -94,6 +107,15 @@ def main(instance, input_name, input_endpoint):
                     plate_text, score = choose_best_ocr_prediction(prediction[0])
 
                     if not validate_text(plate_text):
+                        if SAVE_SUSPECT_DETECTIONS:
+                            if not frame_id:
+                                frame_id = str(uuid.uuid4())
+                            PlateObject.suspect_detections.append({ 
+                                "frame_id": frame_id, 
+                                "frame": frame, 
+                                "coords": [x1, y1, x2, y2], 
+                                "type": 2
+                            })
                         continue
                     
                     if PlateObject.instances.get(instance) is None:
