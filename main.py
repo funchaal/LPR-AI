@@ -17,6 +17,8 @@ from modules.postprocess import post_process_plate, choose_best_ocr_prediction
 
 from modules.capture import init_capture, get_frame
 
+from modules.validate import validate_bounding_box, validate_text
+
 from modules.PlateObject import PlateObject
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -37,6 +39,9 @@ OCR_DETECTION_MODEL = config["ocr_detection_model"]
 OCR_CLASSIFICATION_MODEL = config["ocr_classification_model"]
 USE_ANGLE_CLS = config["use_angle_cls"]
 USE_OPENVINO = config["use_openvino"]
+USE_DETECTION = config["use_detection"]
+
+SAVE_SUSPECT_DETECTIONS = config["save_suspect_detections"]
 
 def main(instance, input_name, input_endpoint):
     model = load_yolo(PLATE_MODEL_PATH)
@@ -45,7 +50,8 @@ def main(instance, input_name, input_endpoint):
         rec_model_dir=OCR_RECOGNITION_MODEL,
         cls_model_dir=OCR_CLASSIFICATION_MODEL,
         use_angle_cls=USE_ANGLE_CLS,
-        use_openvino=USE_OPENVINO
+        use_openvino=USE_OPENVINO, 
+        use_det=USE_DETECTION
     )
 
     cap, source_type = init_capture(input_endpoint)
@@ -74,19 +80,22 @@ def main(instance, input_name, input_endpoint):
 
             for x1, y1, x2, y2, prob, cls in objects:
                 x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
+
+                if not validate_bounding_box(x1, y1, x2, y2):
+                    continue
+
                 plate_crop = frame[y1:y2, x1:x2]
 
                 adjusted = post_process_plate(plate_crop)
 
-                prediction = ocr.ocr(adjusted, cls=False)
+                prediction = ocr.ocr(adjusted, cls=USE_ANGLE_CLS, det=USE_DETECTION)
 
                 if prediction and prediction[0]:
                     plate_text, score = choose_best_ocr_prediction(prediction[0])
-                # if prediction:
-                #     # Quando `det=False`, o retorno é direto: [[('ABC1234', 0.98)]]
-                #     best_result = prediction[0][0]  # Pega o primeiro item
-                #     plate_text, score = best_result
 
+                    if not validate_text(plate_text):
+                        continue
+                    
                     if PlateObject.instances.get(instance) is None:
                         PlateObject.instances[instance] = PlateObject(instance)
 

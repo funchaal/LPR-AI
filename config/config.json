@@ -4,7 +4,9 @@
   "ocr_detection_model": "models/ocr/det/en/en_PP-OCRv3_det_infer/",
   "ocr_classification_model": "models/ocr/cls/ch_ppocr_mobile_v2.0_cls_infer/",
   "use_angle_cls": false,
+  "use_detection": true, 
   "use_openvino": true,
+  "save_suspect_detections": true, 
   "input_sources": {
     "RTG01": {
       "instance": "RTG01", 
