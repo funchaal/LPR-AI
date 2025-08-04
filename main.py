@@ -25,7 +25,7 @@ from modules.PlateObject import PlateObject
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-CONFIG_PATH = '/config/config.json'
+CONFIG_PATH = 'config/config.json'
 config = load_config(CONFIG_PATH)
 
 LOG_PATH = config["logging_path"]

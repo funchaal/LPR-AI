@@ -34,8 +34,9 @@ class PlateObject:
         return f'({self.id}) possible plates: {self.possibleReadings}, final plate: {self.finalReading}'
     
     @classmethod
-    def setup(cls, db_connection, captures_save_path, api=lambda instance, readings: None):
+    def setup(cls, db_connection, captures_save_path, suspect_detections_save_path, api=lambda instance, readings: None):
         cls.db_connection = sqlite3.connect(db_connection)
+        cls.suspect_detections_save_path = suspect_detections_save_path
         cls.captures_save_path = captures_save_path
         cls.api = api
         cursor = cls.db_connection.cursor()
@@ -103,6 +104,8 @@ class PlateObject:
 
             # Salva a imagem
             cv2.imwrite(filepath, cropped)
+
+        cls.suspect_detections = []
         
         logging.info(f"Detecções suspeitas salvas com sucesso.")
 
