@@ -94,12 +94,13 @@ class PlateObject:
             frame = detection["frame"]
             x1, y1, x2, y2 = detection["coords"]
             tipo = detection["type"]
+            input_name = detection["input_name"]
 
             # Recorta a imagem com base nas coordenadas
             cropped = frame[y1:y2, x1:x2]
 
             # Formata o nome do arquivo
-            filename = f"{frame_id}  {x1}-{y1}-{x2}-{y2} {tipo}.jpg"
+            filename = f"{input_name} {x1}-{y1}-{x2}-{y2} {tipo} {frame_id}.jpg"
             filepath = os.path.join(cls.suspect_detections_save_path, filename)
 
             # Salva a imagem
@@ -137,10 +138,11 @@ class PlateObject:
                 # Cria as pastas, se não existirem
                 os.makedirs(folder_path, exist_ok=True)
 
-                x1, y1, x2, y2 = best_frame['plateBoundingBox']
+                x1, y1, x2, y2 = best_frame['plate_bounding_box']
+                input_name = best_frame['input_name']
 
                 # Nome do arquivo a partir do captures_save_path original
-                filename = os.path.basename(f"{self.finalReading} {x1}-{y1}-{x2}-{y2} {self.id}.jpg")
+                filename = os.path.basename(f"{self.finalReading} {input_name} {x1}-{y1}-{x2}-{y2} {self.id}.jpg")
 
                 # Caminho final com pasta ano/mes/dia
                 final_path = os.path.join(folder_path, filename)
@@ -211,11 +213,11 @@ class PlateObject:
         min_distance = float('inf')
 
         for frame in frames:
-            x1, y1, x2, y2 = frame['plateBoundingBox']
+            x1, y1, x2, y2 = frame['plate_bounding_box']
             bbox_center_x = (x1 + x2) / 2
             bbox_center_y = (y1 + y2) / 2
 
-            height, width = frame['inputFrame'].shape[:2]
+            height, width = frame['input_frame'].shape[:2]
             image_center_x = width / 2
             image_center_y = height / 2
 

@@ -93,7 +93,8 @@ def main(instance, input_name, input_endpoint):
                             "frame_id": frame_id, 
                             "frame": frame, 
                             "coords": [x1, y1, x2, y2], 
-                            "type": 1
+                            "type": 1, 
+                            'input_name': input_name
                          })
                     continue
 
@@ -114,7 +115,8 @@ def main(instance, input_name, input_endpoint):
                                 "frame_id": frame_id, 
                                 "frame": frame, 
                                 "coords": [x1, y1, x2, y2], 
-                                "type": 2
+                                "type": 2, 
+                                'input_name': input_name
                             })
                         continue
                     
@@ -123,7 +125,7 @@ def main(instance, input_name, input_endpoint):
 
                     PlateObject.instances[instance].addCapture(
                         str(re.sub(r'[^a-zA-Z0-9]', '', plate_text)).upper(),
-                        {'inputFrame': frame, 'plateBoundingBox': [x1, y1, x2, y2]}
+                        {'input_frame': frame, 'plate_bounding_box': [x1, y1, x2, y2], 'input_name': input_name}
                     )
                 else:
                     logging.debug(f"Nenhuma placa reconhecida.")
