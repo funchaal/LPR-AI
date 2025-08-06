@@ -99,7 +99,7 @@ class PlateObject:
             cropped = frame[y1:y2, x1:x2]
 
             # Formata o nome do arquivo
-            filename = f"{frame_id} {x1}-{y1}-{x2}-{y2} {tipo}.jpg"
+            filename = f"{frame_id}  {x1}-{y1}-{x2}-{y2} {tipo}.jpg"
             filepath = os.path.join(cls.suspect_detections_save_path, filename)
 
             # Salva a imagem
@@ -137,8 +137,10 @@ class PlateObject:
                 # Cria as pastas, se não existirem
                 os.makedirs(folder_path, exist_ok=True)
 
+                x1, y1, x2, y2 = best_frame['plateBoundingBox']
+
                 # Nome do arquivo a partir do captures_save_path original
-                filename = os.path.basename(f"{self.id}.jpg")
+                filename = os.path.basename(f"{self.finalReading} {x1}-{y1}-{x2}-{y2} {self.id}.jpg")
 
                 # Caminho final com pasta ano/mes/dia
                 final_path = os.path.join(folder_path, filename)
@@ -223,29 +225,7 @@ class PlateObject:
                 min_distance = distance
                 best_frame = frame
 
-        if best_frame is None:
-            return None
-
-        plate_frame = best_frame['inputFrame'].copy()
-        x1, y1, x2, y2 = best_frame['plateBoundingBox']
-
-        # Desenha a bounding box
-        cv2.rectangle(plate_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-        text = self.finalReading if self.finalReading else "N/A"
-        text_pos = (x1, max(y1 - 10, 10))
-
-        (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-        cv2.rectangle(
-            plate_frame,
-            (text_pos[0], text_pos[1] - text_height - baseline),
-            (text_pos[0] + text_width, text_pos[1] + baseline),
-            (0, 255, 0), cv2.FILLED
-        )
-
-        cv2.putText(plate_frame, text, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-
-        return plate_frame
+        return best_frame
 
 
     def definePossibleReadings(self, plates):
