@@ -258,9 +258,9 @@ class PlateObject:
                 for j in range(len(plate) - i + 1)
             )
             for substring in substrings:
-                for reading, count in self.readings.items():
+                for reading, count in plates.items():
                     if substring in reading:
-                        plate_pontuation[plate] += count
+                        plate_pontuation[plate] += plates[plate]
 
         top_plates = sorted(plate_pontuation, key=plate_pontuation.get, reverse=True)[:2]
         return top_plates
