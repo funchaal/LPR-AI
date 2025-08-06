@@ -148,7 +148,7 @@ class PlateObject:
                 final_path = os.path.join(folder_path, filename)
 
                 # Salva a imagem no caminho final
-                cv2.imwrite(final_path, best_frame)
+                cv2.imwrite(final_path, best_frame['input_frame'])
 
                 logging.info(f"Captura salva para placa {self.finalReading}")
         except Exception as e:
