@@ -8,6 +8,7 @@
   "use_openvino": true,
   "save_suspect_detections": true, 
   "suspect_detections_save_path": "../suspect_detections", 
+  "use_multiprocessing": true, 
   "input_sources": {
     "RTG01": {
       "instance": "RTG01", 

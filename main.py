@@ -36,6 +36,8 @@ INPUT_SOURCES = config["input_sources"]
 CAPTURES_SAVE_PATH = config["captures_save_path"]
 DB_CONNECTION = config["db_connection"]
 
+USE_MULTIPROCESSING = config["use_multiprocessing"]
+
 OCR_RECOGNITION_MODEL = config["ocr_recognition_model"]
 OCR_DETECTION_MODEL = config["ocr_detection_model"]
 OCR_CLASSIFICATION_MODEL = config["ocr_classification_model"]
@@ -141,17 +143,27 @@ def main(instance, input_name, input_endpoint):
     logging.info("Processamento finalizado")
 
 if __name__ == '__main__':
-    processes = []
+    if USE_MULTIPROCESSING:
+        processes = []
 
-    for input_name, data in INPUT_SOURCES.items():
+        for input_name, data in INPUT_SOURCES.items():
+            instance = data["instance"]
+            input_endpoint = data["input_endpoint"]
+            
+            logging.info(f"Iniciando processo para {instance} com fonte {input_endpoint}")
+
+            p = Process(target=main, args=(instance, input_name, input_endpoint))
+            p.start()
+            processes.append(p)
+
+        for p in processes:
+            p.join()
+    else:
+        input_name, data = INPUT_SOURCES.items()[0]
+        
         instance = data["instance"]
         input_endpoint = data["input_endpoint"]
-        
+
         logging.info(f"Iniciando processo para {instance} com fonte {input_endpoint}")
 
-        p = Process(target=main, args=(instance, input_name, input_endpoint))
-        p.start()
-        processes.append(p)
-
-    for p in processes:
-        p.join()
+        main(instance, input_name, input_endpoint)
