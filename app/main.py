@@ -98,7 +98,6 @@ def main(instance, input_name, input_endpoint):
                             "type": 1, 
                             'input_name': input_name
                          })
-                    continue
 
                 plate_crop = frame[y1:y2, x1:x2]
 
@@ -120,7 +119,6 @@ def main(instance, input_name, input_endpoint):
                                 "type": 2, 
                                 'input_name': input_name
                             })
-                        continue
                     
                     if PlateObject.instances.get(instance) is None:
                         PlateObject.instances[instance] = PlateObject(instance)
