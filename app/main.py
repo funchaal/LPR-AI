@@ -33,7 +33,7 @@ ROOT_DIR = BASE_DIR.parent
 
 load_dotenv(ROOT_DIR / ".env")
 
-CONFIG_FILE = ROOT_DIR / os.getenv("CONFIG_PATH", "config.json")
+CONFIG_FILE = ROOT_DIR / os.getenv("CONFIG_FILE", "config.json")
 config = load_config(CONFIG_FILE)
 
 LOGS_SAVE_DIR = ROOT_DIR / os.getenv("LOGS_SAVE_DIR", "log/")
