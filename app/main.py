@@ -146,7 +146,7 @@ if __name__ == '__main__':
     if USE_MULTIPROCESSING:
         processes = []
 
-        for input_name, data in INPUT_SOURCES.items():
+        for input_name, data in list(INPUT_SOURCES.items()):
             instance = data["instance"]
             input_endpoint = data["input_endpoint"]
             
