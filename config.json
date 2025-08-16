@@ -1,0 +1,8 @@
+{
+  "input_sources": {
+    "LPR01": {
+      "instance": "RTG01", 
+      "input_endpoint": "test_content/plate video.mp4"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-from collections import Counter, defaultdict
+from collections import defaultdict
 import cv2
 import sqlite3
 from datetime import datetime
@@ -8,7 +8,6 @@ import uuid
 import os
 from datetime import datetime
 import cv2
-from numpy import save
 
 class PlateObject:
 
@@ -66,19 +65,16 @@ class PlateObject:
             logging.info(f"instance {instance_id} closed due to inactivity")
             instance.finalReading = instance.definePossibleReadings(instance.readings)[0]
 
-            print("📸 Leituras registradas até o momento:")
-            print(instance.readings)
+            logging.info("Leituras registradas até o momento:")
+            logging.info(instance.readings)
 
-            print("🔍 Placas possíveis identificadas:")
-            print(instance.possibleReadings)
+            logging.info("Placas possíveis identificadas:")
+            logging.info(instance.possibleReadings)
 
-            print("✅ Placa final escolhida para o instanceo:")
-            print(instance.finalReading)
-
-            print('timestamp: ', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            logging.info('timestamp: ', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
             duration = datetime.now() - instance.start_time
-            print(f"⏱️ instanceamento da placa {instance.finalReading} levou {duration.total_seconds():.2f} segundos.")
+            logging.info(f"A captura da placa {instance.finalReading} levou {duration.total_seconds():.2f} segundos.")
 
             instance.close()
 
@@ -111,7 +107,7 @@ class PlateObject:
         logging.info(f"Detecções suspeitas salvas com sucesso.")
 
     def close(self):
-        logging.info(f"Placa {self.id} finalizada com leitura: {self.finalReading}")
+        logging.info(f"Passagem {self.id} finalizada com leitura: {self.finalReading}")
 
         best_frame = self.chooseBestFrame(self.frames)
         captures_save_path = self.__class__.captures_save_path
@@ -123,8 +119,6 @@ class PlateObject:
 
         try:
             if captures_save_path is not None:
-                # Pegando a pasta pai do captures_save_path
-                base_folder = os.path.dirname(captures_save_path)
 
                 # Data atual
                 now = datetime.now()
@@ -133,7 +127,7 @@ class PlateObject:
                 day = f"{now.day:02d}"
 
                 # Monta o caminho completo: base_folder/ano/mes/dia
-                folder_path = os.path.join(base_folder, year, month, day)
+                folder_path = os.path.join(captures_save_path, year, month, day)
 
                 # Cria as pastas, se não existirem
                 os.makedirs(folder_path, exist_ok=True)
@@ -164,7 +158,7 @@ class PlateObject:
 
             cursor.execute('''
                 INSERT OR REPLACE INTO placas 
-                (id, instance_id, final_plate, timestamp, imagem_path, readings_json, possible_plates_json)
+                (id, instance_id, final_plate, timestamp, imagem_path, readings, possible_plates)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 self.id,
