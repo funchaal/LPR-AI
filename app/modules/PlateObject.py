@@ -62,16 +62,12 @@ class PlateObject:
 
         if instance.noFrameCount > 5:
             instance.closed = True
-            logging.info(f"instance {instance_id} closed due to inactivity")
+            
             instance.finalReading = instance.definePossibleReadings(instance.readings)[0]
+            logging.info(f"A passagem {instance_id} foi fechada pois a placa saiu do frame")
+            logging.info(f"Leituras registradas até o momento: {instance.readings}")
 
-            logging.info("Leituras registradas até o momento:")
-            logging.info(instance.readings)
-
-            logging.info("Placas possíveis identificadas:")
-            logging.info(instance.possibleReadings)
-
-            logging.info('timestamp: ', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            logging.info(f"Placas possíveis identificadas: {instance.possibleReadings}")
 
             duration = datetime.now() - instance.start_time
             logging.info(f"A captura da placa {instance.finalReading} levou {duration.total_seconds():.2f} segundos.")
