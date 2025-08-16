@@ -103,16 +103,15 @@ def main(instance, input_name, input_endpoint):
             for x1, y1, x2, y2, prob, cls in objects:
                 x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
 
-                if not validate_bounding_box(x1, y1, x2, y2):
-                    if SAVE_SUSPECT_DETECTIONS:
-                        frame_id = str(uuid.uuid4())
-                        PlateObject.suspect_detections.append({ 
-                            "frame_id": frame_id, 
-                            "frame": frame, 
-                            "coords": [x1, y1, x2, y2], 
-                            "type": 1, 
-                            'input_name': input_name
-                         })
+                if SAVE_SUSPECT_DETECTIONS and not validate_bounding_box(x1, y1, x2, y2):
+                    frame_id = str(uuid.uuid4())
+                    PlateObject.suspect_detections.append({ 
+                        "frame_id": frame_id, 
+                        "frame": frame, 
+                        "coords": [x1, y1, x2, y2], 
+                        "type": 1, 
+                        'input_name': input_name
+                        })
 
                 plate_crop = frame[y1:y2, x1:x2]
 
@@ -120,20 +119,28 @@ def main(instance, input_name, input_endpoint):
 
                 prediction = ocr.ocr(adjusted, cls=USE_OCR_ANGLE_CLS, det=USE_OCR_DETECTION)
 
-                if prediction and prediction[0]:
-                    plate_text, score = choose_best_ocr_prediction(prediction[0])
+                plate_text, score = None, None
 
-                    if not validate_text(plate_text):
-                        if SAVE_SUSPECT_DETECTIONS:
-                            if not frame_id:
-                                frame_id = str(uuid.uuid4())
-                            PlateObject.suspect_detections.append({ 
-                                "frame_id": frame_id, 
-                                "frame": frame, 
-                                "coords": [x1, y1, x2, y2], 
-                                "type": 2, 
-                                'input_name': input_name
-                            })
+                if prediction and prediction[0]:
+                    if USE_OCR_DETECTION:
+                        # det=True: usar a função que escolhe a melhor predição
+                        plate_text, score = choose_best_ocr_prediction(prediction[0])
+                    else:
+                        # det=False: pegar direto o texto e score do primeiro item
+                        first_item = prediction[0][0]  # exemplo: ('TLLEL', 0.32)
+                        if isinstance(first_item, tuple) and len(first_item) >= 2:
+                            plate_text, score = first_item
+
+                    if SAVE_SUSPECT_DETECTIONS and not validate_text(plate_text):
+                        if not frame_id:
+                            frame_id = str(uuid.uuid4())
+                        PlateObject.suspect_detections.append({ 
+                            "frame_id": frame_id, 
+                            "frame": frame, 
+                            "coords": [x1, y1, x2, y2], 
+                            "type": 2, 
+                            'input_name': input_name
+                        })
                     
                     if PlateObject.instances.get(instance) is None:
                         PlateObject.instances[instance] = PlateObject(instance)

@@ -3,7 +3,7 @@ import logging
 
 def load_yolo(model_path):
     try:
-        model = YOLO(model_path, verbose=False)
+        model = YOLO(model_path, tast="detect", verbose=False)
         logging.info(f"Modelo YOLO carregado de {model_path}")
         return model
     except Exception as e:
