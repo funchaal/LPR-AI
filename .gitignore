@@ -1,2 +1,5 @@
 log/
 venv/
+captures/
+db/
+suspect_detections/

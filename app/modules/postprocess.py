@@ -24,3 +24,30 @@ def choose_best_ocr_prediction(predictions):
             score = det_conf
 
     return plate_text, score
+
+import cv2
+
+def crop_margin(frame, margin_percent):
+    """
+    Corta uma margem percentual da imagem para dentro.
+
+    Args:
+        frame (numpy.ndarray): Imagem OpenCV (BGR).
+        margin_percent (int): Percentual da margem a cortar (0-100).
+
+    Returns:
+        numpy.ndarray: Imagem cropped.
+    """
+    if not 0 <= margin_percent <= 100:
+        raise ValueError("margin_percent deve estar entre 0 e 100")
+
+    h, w = frame.shape[:2]
+
+    # Calcula pixels a cortar
+    margin_h = int(h * margin_percent / 100)
+    margin_w = int(w * margin_percent / 100)
+
+    # Crop
+    cropped_frame = frame[margin_h:h - margin_h, margin_w:w - margin_w]
+
+    return cropped_frame
