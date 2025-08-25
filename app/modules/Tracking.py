@@ -93,6 +93,9 @@ class Tracking:
         Finaliza o rastreamento, salva a imagem de captura e registra os dados
         através do gerenciador de banco de dados.
         """
+        logging.info("Leituras realizadas: %s", self.readings)
+        logging.info("Leituras possíveis: %s", self.possibleReadings)
+        
         logging.info(f"Finalizando passagem {self.id} com leitura final: {self.finalReading}")
         
         # 1. Salva a imagem da melhor captura e obtém seu caminho
