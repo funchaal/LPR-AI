@@ -1,34 +1,23 @@
 from multiprocessing import Process
-
 import json
-
 import os
 import re
 import cv2
 import logging
-
 import uuid
+import numpy as np
 
 from modules.detector import load_yolo
-
 from app_utils.logger import setup_logger
-
 from app_utils.config import load_config
-
 from modules.postprocess import post_process_plate, choose_best_ocr_prediction, crop_margin
-
+from modules.preprocess import draw_polygonal_mask
 from modules.capture import init_capture, get_frame
-
 from modules.validate import validate_bounding_box, validate_text
-
 from modules.Tracking import Tracking
-
 from dotenv import load_dotenv
-
 from app_utils.env_utils import get_env_path, get_env_bool, get_env_int
-
 from pathlib import Path
-
 from modules.db_manager import CapturesDatabase
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -49,9 +38,7 @@ DB_CONNECTION = ROOT_DIR / os.getenv("DB_CONNECTION", "db/captures.db")
 os.makedirs(DB_CONNECTION.parent, exist_ok=True)
 
 PLATE_MODEL = get_env_path(ROOT_DIR, "PLATE_MODEL")
-
 OCR_RECOGNITION_MODEL_DIR = get_env_path(ROOT_DIR, "OCR_RECOGNITION_MODELS_DIR")
-
 OCR_CHAR_DICT_FILE = get_env_path(ROOT_DIR, "OCR_CHAR_DICT_FILE")
 CHAR_CORRECTIONS_FILE = get_env_path(ROOT_DIR, "CHAR_CORRECTIONS_FILE")
 
@@ -88,19 +75,16 @@ if USE_OCR_ANGLE_CLS:
 CAPTURES_SAVE_DIR = get_env_path(ROOT_DIR, "CAPTURES_SAVE_DIR")
 SAVE_SUSPECT_DETECTIONS = get_env_bool("SAVE_SUSPECT_DETECTIONS")
 SUSPECT_DETECTIONS_SAVE_DIR = get_env_path(ROOT_DIR, "SUSPECT_DETECTIONS_SAVE_DIR")
-
 USE_CONTINUOUS_TRIES = get_env_bool("USE_CONTINUOUS_TRIES", False)
-
 INPUT_SOURCES = config["input_sources"]
 
-def process_source(instance_id, input_name, input_endpoint):
+def process_source(instance_id, input_name, input_endpoint, polygons=None):
     if USE_OCR_OPENVINO:
         from modules.openvino_ocr import init_ocr
     else:
         from modules.ocr import init_ocr
 
     setup_logger(LOGS_SAVE_DIR)
-
     model = load_yolo(PLATE_MODEL)
 
     ocr = init_ocr(
@@ -108,13 +92,12 @@ def process_source(instance_id, input_name, input_endpoint):
         rec_model_dir=str(OCR_RECOGNITION_MODEL),
         cls_model_dir=str(OCR_CLASSIFICATION_MODEL),
         use_angle_cls=USE_OCR_ANGLE_CLS,
-        use_det=USE_OCR_DETECTION, 
+        use_det=USE_OCR_DETECTION,
         char_dict_file=OCR_CHAR_DICT_FILE
     )
 
     cap, source_type = init_capture(input_endpoint)
-
-    logging.info("Iniciando captura de vídeo")
+    logging.info(f"Iniciando captura de vídeo para {input_name}")
 
     db_manager = CapturesDatabase(db_path=DB_CONNECTION)
 
@@ -123,7 +106,7 @@ def process_source(instance_id, input_name, input_endpoint):
         instance_id=instance_id,
         captures_save_path=CAPTURES_SAVE_DIR,
         suspect_detections_save_path=SUSPECT_DETECTIONS_SAVE_DIR,
-        reading_formats=READING_FORMATS, 
+        reading_formats=READING_FORMATS,
         char_corrections=char_corrections
     )
 
@@ -140,9 +123,13 @@ def process_source(instance_id, input_name, input_endpoint):
                 logging.warning("Mensagem de erro ao obter frame do vídeo.")
                 break
 
+        ### <<< ADICIONADO: Aplica a máscara poligonal no frame antes do processamento ###
+        processed_frame = draw_polygonal_mask(frame, polygons)
+        
         Tracking.newFrame()
 
-        results = model.predict(frame, verbose=False)
+        ### <<< MODIFICADO: Usa o frame processado com a máscara para a predição ###
+        results = model.predict(processed_frame, verbose=False)
 
         frame_id = None
 
@@ -154,18 +141,18 @@ def process_source(instance_id, input_name, input_endpoint):
 
                 if SAVE_SUSPECT_DETECTIONS and not validate_bounding_box(x1, y1, x2, y2):
                     frame_id = str(uuid.uuid4())
-                    Tracking.suspect_detections.append({ 
-                        "frame_id": frame_id, 
-                        "frame": frame, 
-                        "coords": [x1, y1, x2, y2], 
-                        "type": 1, 
+                    Tracking.suspect_detections.append({
+                        "frame_id": frame_id,
+                        "frame": frame,
+                        "coords": [x1, y1, x2, y2],
+                        "type": 1,
                         'input_name': input_name
-                        })
+                    })
 
+                # Usa o frame original para recortar a placa
                 plate_crop = frame[y1:y2, x1:x2]
 
                 adjusted = post_process_plate(plate_crop)
-
                 plate_text, score = None, None
 
                 if USE_OCR_DETECTION:
@@ -179,7 +166,7 @@ def process_source(instance_id, input_name, input_endpoint):
                     prediction = ocr.ocr(crop_margin(adjusted, margin_percent=CROP_MARGIN), det=USE_OCR_DETECTION, cls=USE_OCR_ANGLE_CLS)
 
                     if prediction and prediction[0]:
-                        first_item = prediction[0][0]  # exemplo: ('TLLEL', 0.32)
+                        first_item = prediction[0][0]
                         if isinstance(first_item, tuple) and len(first_item) >= 2:
                             plate_text, score = first_item
                     else:
@@ -188,11 +175,11 @@ def process_source(instance_id, input_name, input_endpoint):
                 if SAVE_SUSPECT_DETECTIONS and not validate_text(plate_text):
                     if not frame_id:
                         frame_id = str(uuid.uuid4())
-                    Tracking.suspect_detections.append({ 
-                        "frame_id": frame_id, 
-                        "frame": frame, 
-                        "coords": [x1, y1, x2, y2], 
-                        "type": 2, 
+                    Tracking.suspect_detections.append({
+                        "frame_id": frame_id,
+                        "frame": frame,
+                        "coords": [x1, y1, x2, y2],
+                        "type": 2,
                         'input_name': input_name
                     })
 
@@ -204,18 +191,24 @@ def process_source(instance_id, input_name, input_endpoint):
                     str(re.sub(r'[^a-zA-Z0-9]', '', plate_text)).upper(),
                     {'input_frame': frame, 'plate_bounding_box': [x1, y1, x2, y2], 'input_name': input_name}
                 )
-            else:
-                logging.debug(f"Nenhuma placa reconhecida.")
+        else:
+            logging.debug(f"Nenhuma placa reconhecida.")
 
-        cv2.imshow("frame", frame)
+        ### <<< ADICIONADO: Desenha os polígonos no frame de exibição para visualização ###
+        if polygons:
+            polygon_pts = [np.array(p, dtype=np.int32) for p in polygons]
+            cv2.polylines(frame, polygon_pts, isClosed=True, color=(0, 255, 0), thickness=2)
+
+        cv2.imshow(f"Frame - {input_name}", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             logging.info("Tecla 'q' pressionada, encerrando captura")
             break
-    
+
     if cap:
         cap.release()
     cv2.destroyAllWindows()
-    logging.info("Processamento finalizado")
+    logging.info(f"Processamento finalizado para {input_name}")
+
 
 def main():
     """
@@ -227,25 +220,24 @@ def main():
         for input_name, data in list(INPUT_SOURCES.items()):
             instance = data["instance"]
             input_endpoint = data["input_endpoint"]
+            polygons = data.get("polygons", None)
             
             logging.info(f"Iniciando processo para {instance} com fonte {input_endpoint}")
 
-            # --- MUDANÇA PRINCIPAL: O target agora é a função trabalhadora ---
-            p = Process(target=process_source, args=(instance, input_name, input_endpoint))
+            p = Process(target=process_source, args=(instance, input_name, input_endpoint, polygons))
             p.start()
             processes.append(p)
 
         for p in processes:
             p.join()
     else:
-        print('hello')
         input_name, data = list(INPUT_SOURCES.items())[0]
         instance_id = data["instance"]
         input_endpoint = data["input_endpoint"]
+        polygons = data.get("polygons", None)
 
         logging.info(f"Iniciando processo para {instance_id} com fonte {input_endpoint}")
-        # Chama a função trabalhadora diretamente
-        process_source(instance_id, input_name, input_endpoint)
+        process_source(instance_id, input_name, input_endpoint, polygons)
 
 if __name__ == '__main__':
     main()
