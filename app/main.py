@@ -1,3 +1,5 @@
+# main.py
+
 from multiprocessing import Process
 import json
 import os
@@ -27,6 +29,7 @@ ROOT_DIR = BASE_DIR.parent
 
 load_dotenv(ROOT_DIR / ".env")
 
+# ... (outras configurações permanecem as mesmas) ...
 CONFIG_FILE = ROOT_DIR / os.getenv("CONFIG_FILE", "config.json")
 config = load_config(CONFIG_FILE)
 
@@ -38,7 +41,6 @@ DB_CONNECTION = ROOT_DIR / os.getenv("DB_CONNECTION", "db/captures.db")
 os.makedirs(DB_CONNECTION.parent, exist_ok=True)
 
 PLATE_MODEL = get_env_path(ROOT_DIR, "PLATE_MODEL")
-OCR_RECOGNITION_MODEL_DIR = get_env_path(ROOT_DIR, "OCR_RECOGNITION_MODELS_DIR")
 OCR_CHAR_DICT_FILE = get_env_path(ROOT_DIR, "OCR_CHAR_DICT_FILE")
 CHAR_CORRECTIONS_FILE = get_env_path(ROOT_DIR, "CHAR_CORRECTIONS_FILE")
 
@@ -48,7 +50,13 @@ with open(CHAR_CORRECTIONS_FILE, 'r', encoding='utf-8') as f:
 READING_FORMATS = os.getenv("READING_FORMATS")
 READING_FORMATS = READING_FORMATS.split(",") if READING_FORMATS else []
 
-OCR_DETECTION_MODEL_DIR = get_env_path(ROOT_DIR, "OCR_DETECTION_MODELS_DIR")
+# Carregue os novos caminhos do .env
+OPENVINO_OCR_DET_MODEL_PATH = get_env_path(ROOT_DIR, "OPENVINO_OCR_DET_MODEL", None)
+OPENVINO_OCR_REC_MODEL_PATH = get_env_path(ROOT_DIR, "OPENVINO_OCR_REC_MODEL", None)
+PADDLE_OCR_DET_MODEL_PATH = get_env_path(ROOT_DIR, "PADDLE_OCR_DET_MODEL", None)
+PADDLE_OCR_REC_MODEL_PATH = get_env_path(ROOT_DIR, "PADDLE_OCR_REC_MODEL", None)
+
+# A variável de classificação continua a mesma
 OCR_CLASSIFICATION_MODEL_DIR = get_env_path(ROOT_DIR, "OCR_CLASSIFICATION_MODELS_DIR", "")
 
 USE_OCR_OPENVINO = get_env_bool("USE_OCR_OPENVINO")
@@ -59,24 +67,37 @@ OCR_DETECTION_MODEL = None
 OCR_RECOGNITION_MODEL = None
 OCR_CLASSIFICATION_MODEL = None
 
+# --- LÓGICA AJUSTADA ---
+# Seleciona os caminhos com base na flag USE_OCR_OPENVINO
 if USE_OCR_OPENVINO:
-    if USE_OCR_DETECTION:
-        OCR_DETECTION_MODEL = OCR_DETECTION_MODEL_DIR / 'openvino/det/en_PP-OCRv3_det_infer.xml'
-    OCR_RECOGNITION_MODEL = OCR_RECOGNITION_MODEL_DIR / 'openvino/rec/en_PP-OCRv4_rec_infer.xml'
+    logging.info("Usando modelos OpenVINO para OCR.")
+    # Lê o caminho do modelo da variável 'X' (OPENVINO)
+    OCR_DETECTION_MODEL = OPENVINO_OCR_DET_MODEL_PATH
+    OCR_RECOGNITION_MODEL = OPENVINO_OCR_REC_MODEL_PATH
 else:
-    if USE_OCR_DETECTION:
-        OCR_DETECTION_MODEL = OCR_DETECTION_MODEL_DIR / "paddlepaddle/det/en/en_PP-OCRv3_det_infer/"
-    OCR_RECOGNITION_MODEL = OCR_RECOGNITION_MODEL_DIR / "paddlepaddle/rec/en/en_PP-OCRv4_rec_infer/"
+    logging.info("Usando modelos PaddlePaddle para OCR.")
+    # Lê o caminho do modelo da variável 'Y' (PADDLE)
+    OCR_DETECTION_MODEL = PADDLE_OCR_DET_MODEL_PATH
+    OCR_RECOGNITION_MODEL = PADDLE_OCR_REC_MODEL_PATH
+
+# Garante que o modelo de detecção não seja carregado se não for usado
+if not USE_OCR_DETECTION:
+    OCR_DETECTION_MODEL = None
 
 USE_OCR_ANGLE_CLS = get_env_bool("USE_OCR_ANGLE_CLS")
 if USE_OCR_ANGLE_CLS:
     OCR_CLASSIFICATION_MODEL = OCR_CLASSIFICATION_MODEL_DIR / "paddlepaddle/cls/ch_ppocr_mobile_v2.0_cls_infer/"
+
+
+# --- Nova Configuração ---
+API_ENDPOINT = os.getenv("API_ENDPOINT", None) # <- Adicionado
 
 CAPTURES_SAVE_DIR = get_env_path(ROOT_DIR, "CAPTURES_SAVE_DIR")
 SAVE_SUSPECT_DETECTIONS = get_env_bool("SAVE_SUSPECT_DETECTIONS")
 SUSPECT_DETECTIONS_SAVE_DIR = get_env_path(ROOT_DIR, "SUSPECT_DETECTIONS_SAVE_DIR")
 USE_CONTINUOUS_TRIES = get_env_bool("USE_CONTINUOUS_TRIES", False)
 INPUT_SOURCES = config["input_sources"]
+
 
 def process_source(instance_id, input_name, input_endpoint, polygons=None):
     if USE_OCR_OPENVINO:
@@ -107,7 +128,9 @@ def process_source(instance_id, input_name, input_endpoint, polygons=None):
         captures_save_path=CAPTURES_SAVE_DIR,
         suspect_detections_save_path=SUSPECT_DETECTIONS_SAVE_DIR,
         reading_formats=READING_FORMATS,
-        char_corrections=char_corrections
+        char_corrections=char_corrections,
+        use_continuous_tries=USE_CONTINUOUS_TRIES, # <- Adicionado para clareza
+        api_endpoint=API_ENDPOINT # <- Adicionado
     )
 
     track = None
@@ -123,12 +146,10 @@ def process_source(instance_id, input_name, input_endpoint, polygons=None):
                 logging.warning("Mensagem de erro ao obter frame do vídeo.")
                 break
 
-        ### <<< ADICIONADO: Aplica a máscara poligonal no frame antes do processamento ###
         processed_frame = draw_polygonal_mask(frame, polygons)
         
         Tracking.newFrame()
 
-        ### <<< MODIFICADO: Usa o frame processado com a máscara para a predição ###
         results = model.predict(processed_frame, verbose=False)
 
         frame_id = None
@@ -149,9 +170,7 @@ def process_source(instance_id, input_name, input_endpoint, polygons=None):
                         'input_name': input_name
                     })
 
-                # Usa o frame original para recortar a placa
                 plate_crop = frame[y1:y2, x1:x2]
-
                 adjusted = post_process_plate(plate_crop)
                 plate_text, score = None, None
 
@@ -169,8 +188,8 @@ def process_source(instance_id, input_name, input_endpoint, polygons=None):
                         first_item = prediction[0][0]
                         if isinstance(first_item, tuple) and len(first_item) >= 2:
                             plate_text, score = first_item
-                    else:
-                        continue
+                        else:
+                            continue
 
                 if SAVE_SUSPECT_DETECTIONS and not validate_text(plate_text):
                     if not frame_id:
@@ -186,6 +205,11 @@ def process_source(instance_id, input_name, input_endpoint, polygons=None):
                 if not Tracking.trackings:
                     track = Tracking()
                     Tracking.trackings[track.id] = track
+                # Simplificação: assume que há apenas um tracking por vez, como no código original
+                elif not track or track.id not in Tracking.trackings:
+                    track = Tracking()
+                    Tracking.trackings[track.id] = track
+
 
                 Tracking.trackings[track.id].addCapture(
                     str(re.sub(r'[^a-zA-Z0-9]', '', plate_text)).upper(),
@@ -194,7 +218,6 @@ def process_source(instance_id, input_name, input_endpoint, polygons=None):
         else:
             logging.debug(f"Nenhuma placa reconhecida.")
 
-        ### <<< ADICIONADO: Desenha os polígonos no frame de exibição para visualização ###
         if polygons:
             polygon_pts = [np.array(p, dtype=np.int32) for p in polygons]
             cv2.polylines(frame, polygon_pts, isClosed=True, color=(0, 255, 0), thickness=2)
