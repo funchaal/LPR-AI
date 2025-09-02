@@ -60,6 +60,7 @@ PADDLE_OCR_REC_MODEL_PATH = get_env_path(ROOT_DIR, "PADDLE_OCR_REC_MODEL", None)
 OCR_CLASSIFICATION_MODEL_DIR = get_env_path(ROOT_DIR, "OCR_CLASSIFICATION_MODELS_DIR", "")
 
 USE_OCR_OPENVINO = get_env_bool("USE_OCR_OPENVINO")
+SHOW_CAPTURES = get_env_bool("SHOW_CAPTURES")
 USE_OCR_DETECTION = get_env_bool("USE_OCR_DETECTION")
 CROP_MARGIN = get_env_int("CROP_MARGIN")
 
@@ -213,19 +214,21 @@ def process_source(instance_id, input_name, input_endpoint, polygons=None):
 
                 Tracking.trackings[track.id].addCapture(
                     str(re.sub(r'[^a-zA-Z0-9]', '', plate_text)).upper(),
-                    {'input_frame': frame, 'plate_bounding_box': [x1, y1, x2, y2], 'input_name': input_name}
+                    {'input_frame': frame, 'plate_bounding_box': [x1, y1, x2, y2], 'input_name': input_name, 'reading': plate_text}
                 )
         else:
             logging.debug(f"Nenhuma placa reconhecida.")
 
-        if polygons:
-            polygon_pts = [np.array(p, dtype=np.int32) for p in polygons]
-            cv2.polylines(frame, polygon_pts, isClosed=True, color=(0, 255, 0), thickness=2)
+        if SHOW_CAPTURES:
+            if polygons:
+                polygon_pts = [np.array(p, dtype=np.int32) for p in polygons]
+                drawn_frame = frame.copy()
+                drawn_frame = cv2.polylines(drawn_frame, polygon_pts, isClosed=True, color=(0, 255, 0), thickness=2)
 
-        cv2.imshow(f"Frame - {input_name}", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            logging.info("Tecla 'q' pressionada, encerrando captura")
-            break
+            cv2.imshow(f"Frame - {input_name}", drawn_frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                logging.info("Tecla 'q' pressionada, encerrando captura")
+                break
 
     if cap:
         cap.release()
