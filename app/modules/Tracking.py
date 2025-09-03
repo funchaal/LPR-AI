@@ -9,7 +9,7 @@ import cv2
 import requests 
 import threading
 
-from levenshtein import levenshtein
+from modules.levenshtein import levenshtein
 
 from itertools import product
 from typing import Dict, List
@@ -203,37 +203,49 @@ class Tracking:
     
     def chooseBestFrame(self, frames: list) -> dict | None:
         """
-        Seleciona o melhor frame. Primeiro, filtra os frames cuja leitura de texto
-        tenha uma distância de Levenshtein <= 2 em relação a self.text.
-        Depois, entre os frames filtrados, seleciona aquele com a placa
-        mais próxima ao centro da imagem.
+        Seleciona o melhor frame com uma lógica de fallback progressiva.
+
+        1. Tenta encontrar frames com distância de Levenshtein <= 2.
+        2. Se não encontrar, tenta com distância <= 3.
+        3. Se não encontrar, tenta com distância <= 4.
+        4. Se ainda assim não encontrar nenhum, ignora o filtro de texto e
+        usa a lista de frames original completa.
+        
+        Após a filtragem, seleciona o frame com a placa mais próxima ao
+        centro da imagem. Isso garante que um frame sempre seja retornado,
+        desde que a lista inicial não esteja vazia.
         """
         if not frames:
             return None
 
-        # 1. Criar uma lista de frames "candidatos" que passam no filtro de Levenshtein
         candidate_frames = []
-        for frame in frames:
-            try:
-                # Pega o texto do campo 'reading'. Usar .get() evita erros se a chave não existir.
-                reading_text = frame.get('reading', '')
+        # Loop de tentativas com distâncias progressivas
+        for max_distance in [2, 3, 4]:
+            # Filtra os frames para a distância atual
+            for frame in frames:
+                try:
+                    reading_text = frame.get('reading', '')
+                    if levenshtein(self.text, reading_text) <= max_distance:
+                        candidate_frames.append(frame)
+                except Exception as e:
+                    logging.warning(f"Erro ao processar o texto do frame na filtragem (distância {max_distance}): {e}")
+                    continue
+            
+            # Se encontramos candidatos, paramos de procurar e usamos essa lista
+            if candidate_frames:
+                # logging.info(f"Encontrados {len(candidate_frames)} frames candidatos com distância Levenshtein <= {max_distance}.")
+                break
 
-                # Se a distância de Levenshtein for 2 ou menos, o frame é um candidato válido.
-                # A sua observação "(o best frame só pode ser que o texto estiver contido na imagem)"
-                # é bem representada por essa condição, pois uma distância pequena (0, 1 ou 2)
-                # indica que os textos são quase idênticos, como em um caso de OCR com pequenos erros.
-                if levenshtein(self.text, reading_text) <= 2:
-                    candidate_frames.append(frame)
-            except Exception as e:
-                # Captura outras exceções inesperadas durante a filtragem
-                logging.warning(f"Erro ao processar o texto do frame na filtragem: {e}")
-                continue
-        
-        # Se nenhum frame passou no filtro de texto, não há o que escolher.
+        # --- FALLBACK FINAL ---
+        # Se, após todas as tentativas, a lista de candidatos ainda estiver vazia,
+        # usamos a lista original de frames como candidata.
+        # O importante é não ficar sem salvar.
         if not candidate_frames:
-            return None
+            # logging.warning("Nenhum frame encontrado com Levenshtein <= 4. Usando todos os frames para critério de centralização.")
+            candidate_frames = frames
 
-        # 2. Aplicar a lógica original de distância APENAS nos frames candidatos
+        # Agora, aplicamos a lógica de encontrar o mais centralizado
+        # na lista de candidatos que foi definida (seja por Levenshtein ou pelo fallback)
         best_frame = None
         min_distance = float('inf')
 
@@ -245,7 +257,6 @@ class Tracking:
                 x1, y1, x2, y2 = frame['plate_bounding_box']
                 bbox_center_x, bbox_center_y = (x1 + x2) / 2, (y1 + y2) / 2
                 
-                # Calcula a distância geométrica do bbox ao centro
                 distance = ((bbox_center_x - image_center_x) ** 2 + (bbox_center_y - image_center_y) ** 2) ** 0.5
 
                 if distance < min_distance:
