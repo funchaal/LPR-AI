@@ -5,7 +5,7 @@ from openvino.preprocess import PrePostProcessor
 
 MODELS_TO_CONVERT = {
     'recognition': {
-        'local_path': '../models/ocr/paddlepaddle/rec/en/en_PP-OCRv4_rec_infer_finetuned/inference.pdmodel',
+        'local_path': '../models/ocr/paddlepaddle/rec/en/en_PP-OCRv4_rec_infer/inference.pdmodel',
         'output_name': 'en_PP-OCRv4_rec_infer',
         'convert_args': {
             'input': PartialShape([1, 3, 48, -1]),

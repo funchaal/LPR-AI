@@ -1,269 +1,62 @@
 # main.py
-
-from multiprocessing import Process
-import json
-import os
-import re
-import cv2
 import logging
-import uuid
-import numpy as np
+from multiprocessing import Process, set_start_method
 
-from modules.detector import load_yolo
-from app_utils.logger import setup_logger
-from app_utils.config import load_config
-from modules.postprocess import post_process_plate, choose_best_ocr_prediction, crop_margin
-from modules.preprocess import draw_polygonal_mask
-from modules.capture import init_capture, get_frame
-from modules.validate import validate_bounding_box, validate_text
-from modules.Tracking import Tracking
-from dotenv import load_dotenv
-from app_utils.env_utils import get_env_path, get_env_bool, get_env_int
+import os
+
 from pathlib import Path
-from modules.db_manager import CapturesDatabase
 
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+# Módulos da aplicação
+from app_utils.logger import setup_logger
+from app_utils.config import settings  # Importa o objeto de configurações já pronto
+from modules.engine import process_source # Importa a função de processamento
 
-BASE_DIR = Path(__file__).resolve().parent
-ROOT_DIR = BASE_DIR.parent
-
-load_dotenv(ROOT_DIR / ".env")
-
-# ... (outras configurações permanecem as mesmas) ...
-CONFIG_FILE = ROOT_DIR / os.getenv("CONFIG_FILE", "config.json")
-config = load_config(CONFIG_FILE)
-
-LOGS_SAVE_DIR = ROOT_DIR / os.getenv("LOGS_SAVE_DIR", "log/")
-os.makedirs(LOGS_SAVE_DIR, exist_ok=True)
-setup_logger(LOGS_SAVE_DIR)
-
-DB_CONNECTION = ROOT_DIR / os.getenv("DB_CONNECTION", "db/captures.db")
-os.makedirs(DB_CONNECTION.parent, exist_ok=True)
-
-PLATE_MODEL = get_env_path(ROOT_DIR, "PLATE_MODEL")
-OCR_CHAR_DICT_FILE = get_env_path(ROOT_DIR, "OCR_CHAR_DICT_FILE")
-CHAR_CORRECTIONS_FILE = get_env_path(ROOT_DIR, "CHAR_CORRECTIONS_FILE")
-
-with open(CHAR_CORRECTIONS_FILE, 'r', encoding='utf-8') as f:
-    char_corrections = json.load(f)
-
-READING_FORMATS = os.getenv("READING_FORMATS")
-READING_FORMATS = READING_FORMATS.split(",") if READING_FORMATS else []
-
-# Carregue os novos caminhos do .env
-OPENVINO_OCR_DET_MODEL_PATH = get_env_path(ROOT_DIR, "OPENVINO_OCR_DET_MODEL", None)
-OPENVINO_OCR_REC_MODEL_PATH = get_env_path(ROOT_DIR, "OPENVINO_OCR_REC_MODEL", None)
-PADDLE_OCR_DET_MODEL_PATH = get_env_path(ROOT_DIR, "PADDLE_OCR_DET_MODEL", None)
-PADDLE_OCR_REC_MODEL_PATH = get_env_path(ROOT_DIR, "PADDLE_OCR_REC_MODEL", None)
-
-# A variável de classificação continua a mesma
-OCR_CLASSIFICATION_MODEL_DIR = get_env_path(ROOT_DIR, "OCR_CLASSIFICATION_MODELS_DIR", "")
-
-USE_OCR_OPENVINO = get_env_bool("USE_OCR_OPENVINO")
-SHOW_CAPTURES = get_env_bool("SHOW_CAPTURES")
-USE_OCR_DETECTION = get_env_bool("USE_OCR_DETECTION")
-CROP_MARGIN = get_env_int("CROP_MARGIN")
-
-OCR_DETECTION_MODEL = None
-OCR_RECOGNITION_MODEL = None
-OCR_CLASSIFICATION_MODEL = None
-
-# --- LÓGICA AJUSTADA ---
-# Seleciona os caminhos com base na flag USE_OCR_OPENVINO
-if USE_OCR_OPENVINO:
-    logging.info("Usando modelos OpenVINO para OCR.")
-    # Lê o caminho do modelo da variável 'X' (OPENVINO)
-    OCR_DETECTION_MODEL = OPENVINO_OCR_DET_MODEL_PATH
-    OCR_RECOGNITION_MODEL = OPENVINO_OCR_REC_MODEL_PATH
-else:
-    logging.info("Usando modelos PaddlePaddle para OCR.")
-    # Lê o caminho do modelo da variável 'Y' (PADDLE)
-    OCR_DETECTION_MODEL = PADDLE_OCR_DET_MODEL_PATH
-    OCR_RECOGNITION_MODEL = PADDLE_OCR_REC_MODEL_PATH
-
-# Garante que o modelo de detecção não seja carregado se não for usado
-if not USE_OCR_DETECTION:
-    OCR_DETECTION_MODEL = None
-
-USE_OCR_ANGLE_CLS = get_env_bool("USE_OCR_ANGLE_CLS")
-if USE_OCR_ANGLE_CLS:
-    OCR_CLASSIFICATION_MODEL = OCR_CLASSIFICATION_MODEL_DIR / "paddlepaddle/cls/ch_ppocr_mobile_v2.0_cls_infer/"
-
-
-# --- Nova Configuração ---
-API_ENDPOINT = os.getenv("API_ENDPOINT", None) # <- Adicionado
-
-CAPTURES_SAVE_DIR = get_env_path(ROOT_DIR, "CAPTURES_SAVE_DIR")
-SAVE_SUSPECT_DETECTIONS = get_env_bool("SAVE_SUSPECT_DETECTIONS")
-SUSPECT_DETECTIONS_SAVE_DIR = get_env_path(ROOT_DIR, "SUSPECT_DETECTIONS_SAVE_DIR")
-USE_CONTINUOUS_TRIES = get_env_bool("USE_CONTINUOUS_TRIES", False)
-INPUT_SOURCES = config["input_sources"]
-
-
-def process_source(instance_id, input_name, input_endpoint, polygons=None):
-    if USE_OCR_OPENVINO:
-        from modules.openvino_ocr import init_ocr
-    else:
-        from modules.ocr import init_ocr
-
-    setup_logger(LOGS_SAVE_DIR)
-    model = load_yolo(PLATE_MODEL)
-
-    ocr = init_ocr(
-        det_model_dir=str(OCR_DETECTION_MODEL),
-        rec_model_dir=str(OCR_RECOGNITION_MODEL),
-        cls_model_dir=str(OCR_CLASSIFICATION_MODEL),
-        use_angle_cls=USE_OCR_ANGLE_CLS,
-        use_det=USE_OCR_DETECTION,
-        char_dict_file=OCR_CHAR_DICT_FILE
-    )
-
-    cap, source_type = init_capture(input_endpoint)
-    logging.info(f"Iniciando captura de vídeo para {input_name}")
-
-    db_manager = CapturesDatabase(db_path=DB_CONNECTION)
-
-    Tracking.setup(
-        db_manager=db_manager,
-        instance_id=instance_id,
-        captures_save_path=CAPTURES_SAVE_DIR,
-        suspect_detections_save_path=SUSPECT_DETECTIONS_SAVE_DIR,
-        reading_formats=READING_FORMATS,
-        char_corrections=char_corrections,
-        use_continuous_tries=USE_CONTINUOUS_TRIES, # <- Adicionado para clareza
-        api_endpoint=API_ENDPOINT # <- Adicionado
-    )
-
-    track = None
-
-    while True:
-        frame = get_frame(source_type, cap, input_endpoint)
-
-        if frame is None:
-            if source_type in ("stream", "camera"):
-                logging.warning("Não foi possível ler frame da stream, tentando novamente...")
-                continue
-            else:
-                logging.warning("Mensagem de erro ao obter frame do vídeo.")
-                break
-
-        processed_frame = draw_polygonal_mask(frame, polygons)
-        
-        Tracking.newFrame()
-
-        results = model.predict(processed_frame, verbose=False)
-
-        frame_id = None
-
-        if results[0].boxes:
-            objects = results[0].boxes.data.tolist()
-
-            for x1, y1, x2, y2, prob, cls in objects:
-                x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
-
-                if SAVE_SUSPECT_DETECTIONS and not validate_bounding_box(x1, y1, x2, y2):
-                    frame_id = str(uuid.uuid4())
-                    Tracking.suspect_detections.append({
-                        "frame_id": frame_id,
-                        "frame": frame,
-                        "coords": [x1, y1, x2, y2],
-                        "type": 1,
-                        'input_name': input_name
-                    })
-
-                plate_crop = frame[y1:y2, x1:x2]
-                adjusted = post_process_plate(plate_crop)
-                plate_text, score = None, None
-
-                if USE_OCR_DETECTION:
-                    prediction = ocr.ocr(adjusted, det=USE_OCR_DETECTION, cls=USE_OCR_ANGLE_CLS)
-
-                    if prediction and prediction[0]:
-                        plate_text, score = choose_best_ocr_prediction(prediction[0])
-                    else:
-                        continue
-                else:
-                    prediction = ocr.ocr(crop_margin(adjusted, margin_percent=CROP_MARGIN), det=USE_OCR_DETECTION, cls=USE_OCR_ANGLE_CLS)
-
-                    if prediction and prediction[0]:
-                        first_item = prediction[0][0]
-                        if isinstance(first_item, tuple) and len(first_item) >= 2:
-                            plate_text, score = first_item
-                        else:
-                            continue
-
-                if SAVE_SUSPECT_DETECTIONS and not validate_text(plate_text):
-                    if not frame_id:
-                        frame_id = str(uuid.uuid4())
-                    Tracking.suspect_detections.append({
-                        "frame_id": frame_id,
-                        "frame": frame,
-                        "coords": [x1, y1, x2, y2],
-                        "type": 2,
-                        'input_name': input_name
-                    })
-
-                if not Tracking.trackings:
-                    track = Tracking()
-                    Tracking.trackings[track.id] = track
-                # Simplificação: assume que há apenas um tracking por vez, como no código original
-                elif not track or track.id not in Tracking.trackings:
-                    track = Tracking()
-                    Tracking.trackings[track.id] = track
-
-
-                Tracking.trackings[track.id].addCapture(
-                    str(re.sub(r'[^a-zA-Z0-9]', '', plate_text)).upper(),
-                    {'input_frame': frame, 'plate_bounding_box': [x1, y1, x2, y2], 'input_name': input_name, 'reading': plate_text}
-                )
-        else:
-            logging.debug(f"Nenhuma placa reconhecida.")
-
-        if SHOW_CAPTURES:
-            if polygons:
-                polygon_pts = [np.array(p, dtype=np.int32) for p in polygons]
-                drawn_frame = frame.copy()
-                drawn_frame = cv2.polylines(drawn_frame, polygon_pts, isClosed=True, color=(0, 255, 0), thickness=2)
-
-            cv2.imshow(f"Frame - {input_name}", drawn_frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                logging.info("Tecla 'q' pressionada, encerrando captura")
-                break
-
-    if cap:
-        cap.release()
-    cv2.destroyAllWindows()
-    logging.info(f"Processamento finalizado para {input_name}")
-
+from app_utils.model_optimizer import ensure_best_model
 
 def main():
     """
-    Esta é a função "gerente". Ela apenas cria e gerencia os processos.
+    Função gerente que cria e gerencia os processos para cada fonte de vídeo.
     """
-    if len(list(INPUT_SOURCES.items())) > 1:
-        processes = []
+    # Configura o logger principal
+    setup_logger(settings.LOGS_SAVE_DIR)
+    
+    logging.info("Verificando e otimizando o modelo YOLO antes de iniciar os processos...")
+    optimized_model_path = ensure_best_model() # Não precisa mais de argumentos!
 
-        for input_name, data in list(INPUT_SOURCES.items()):
-            instance = data["instance"]
-            input_endpoint = data["input_endpoint"]
-            polygons = data.get("polygons", None)
-            
-            logging.info(f"Iniciando processo para {instance} com fonte {input_endpoint}")
+    os.environ['_FINAL_COMPUTE_DEVICE'] = settings.COMPUTE_DEVICE
+    
+    # Garante compatibilidade entre multiprocessing e CUDA
+    try:
+        set_start_method('spawn')
+    except RuntimeError:
+        pass
 
-            p = Process(target=process_source, args=(instance, input_name, input_endpoint, polygons))
-            p.start()
-            processes.append(p)
+    if not settings.INPUT_SOURCES:
+        logging.error("Nenhuma fonte de entrada (input_sources) foi definida no arquivo de configuração.")
+        return
 
-        for p in processes:
-            p.join()
-    else:
-        input_name, data = list(INPUT_SOURCES.items())[0]
+    logging.info(f"Iniciando aplicação com {len(settings.INPUT_SOURCES)} fonte(s) de vídeo.")
+    
+    processes = []
+    for input_name, data in settings.INPUT_SOURCES.items():
         instance_id = data["instance"]
         input_endpoint = data["input_endpoint"]
-        polygons = data.get("polygons", None)
-
-        logging.info(f"Iniciando processo para {instance_id} com fonte {input_endpoint}")
-        process_source(instance_id, input_name, input_endpoint, polygons)
+        polygons = data.get("polygons")
+        
+        logging.info(f"Criando processo para: {input_name} (Fonte: {input_endpoint})")
+        
+        process = Process(
+            target=process_source, 
+            args=(instance_id, input_name, input_endpoint, optimized_model_path, polygons)
+        )
+        processes.append(process)
+        process.start()
+        
+    # Aguarda todos os processos terminarem
+    for p in processes:
+        p.join()
+        
+    logging.info("Todos os processos foram finalizados. Encerrando a aplicação.")
 
 if __name__ == '__main__':
     main()

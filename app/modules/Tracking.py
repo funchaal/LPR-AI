@@ -225,7 +225,7 @@ class Tracking:
             for frame in frames:
                 try:
                     reading_text = frame.get('reading', '')
-                    if levenshtein(self.text, reading_text) <= max_distance:
+                    if levenshtein(self.finalReading, reading_text) <= max_distance:
                         candidate_frames.append(frame)
                 except Exception as e:
                     logging.warning(f"Erro ao processar o texto do frame na filtragem (distância {max_distance}): {e}")
