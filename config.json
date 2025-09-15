@@ -1,8 +1,9 @@
 {
-  "input_sources": {
-    "LPR01": {
-      "instance": "RTG01", 
-      "input_endpoint": "D:/Detector/plate detector_v10/plate detector/app/test_content/plate video.mp4"
+    "input_sources": {
+        "LPR01": {
+            "instance": "RTG01", 
+            "input_endpoint": "C:/Users/rafae/Documents/plate_lpr_plate_v2/plate detector/app/test_content/plate video.mp4", 
+            "device": "gpu:1"
+          }
     }
-  }
 }

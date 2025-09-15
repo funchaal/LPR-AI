@@ -2,6 +2,8 @@ import sqlite3
 import logging
 import json
 from datetime import datetime
+import os
+from pathlib import Path
 
 class CapturesDatabase:
     """Gerencia todas as operações com o banco de dados de placas."""
@@ -9,6 +11,7 @@ class CapturesDatabase:
     def __init__(self, db_path: str):
         """Inicializa a conexão com o banco e cria a tabela se não existir."""
         try:
+            os.makedirs(Path(db_path).resolve().parent, exist_ok=True)
             self.db_connection = sqlite3.connect(db_path, check_same_thread=False)
             self._create_table()
         except sqlite3.Error as e:

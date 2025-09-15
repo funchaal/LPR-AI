@@ -8,11 +8,12 @@ import uuid
 import cv2
 import requests 
 import threading
-
-from modules.levenshtein import levenshtein
+import time
 
 from itertools import product
 from typing import Dict, List
+
+from modules.postprocess import RegexValidator, definePossibleReadings, chooseBestFrame, FormatConverter
 
 class Tracking:
     """
@@ -35,7 +36,9 @@ class Tracking:
     # --- Métodos de Instância (para cada passagem individual) ---
 
     def __init__(self):
-        """Inicializa um novo objeto de rastreamento."""
+        """
+        Inicializa um novo objeto de rastreamento.
+        """
         self.start_time = datetime.now()
         self.id = str(uuid.uuid4())
         self.readings = defaultdict(int)
@@ -43,43 +46,74 @@ class Tracking:
         self.finalReading = ''
         self.noFrameCount = 0
         self.frames = []
-        self.is_closing = False
+        self.closed = False
+        self.closing = False  # Flag para indicar que está sendo fechado
+        self.api_calls = 0
+        self.api_returned_200 = False
+        self.leftTheFrame = False
+        self._lock = threading.Lock()
 
     def __str__(self):
-        """Representação em string do objeto de rastreamento."""
+        """
+        Representação em string do objeto de rastreamento.
+        """
         return f'ID: {self.id}, Placas Possíveis: {self.possibleReadings}, Placa Final: {self.finalReading}'
 
-    def addCapture(self, reading: str, frame_data: dict):
+    def addCapture(self, capture_data: dict):
         """
         Adiciona uma nova leitura e os dados do frame a este rastreamento.
         """
-        self.readings[reading] += 1
-        self.frames.append(frame_data)
-        self.noFrameCount = 0
+        with self._lock:
+            if self.closed or self.closing:
+                return
+                
+            self.readings[capture_data['reading']] += 1
+            self.frames.append(capture_data)
+            self.noFrameCount = 0
 
-        if self.__class__.use_continuous_tries:
-            self._update_and_call_api()
+            if self.__class__.use_continuous_tries:
+                self._update_and_call_api()
 
     def _call_api_async(self, payload: dict):
         """
         Função alvo da thread para chamar a API de forma assíncrona.
         """
-        try:
-            logging.info(f"Enviando dados para API para captura {self.id}: {payload['readings']}")
-            response = requests.post(self.__class__.api_endpoint, json=payload, timeout=10)
+        if self.api_returned_200:
+            return
 
+        try:
+            self.api_calls += 1
+            logging.info(f"Enviando dados para API para captura {self.id}: {payload['readings']}")
+
+            response = requests.post(self.__class__.api_endpoint, json=payload, timeout=30, auth=self.__class__.auth)
+
+            # Verifica se o tracking ainda existe (pode ter sido removido)
             track_instance = self.__class__.trackings.get(self.id)
             if not track_instance:
-                logging.warning(f"API retornou para a captura {self.id}, mas ela já foi fechada.")
+                logging.warning(f"API retornou para a captura {self.id}, mas ela já foi removida.")
                 return
-
+    
             if response.status_code == 200:
-                correct_reading = response.text
+                if self.api_returned_200:
+                    logging.info(f"API já retornou 200 anteriormente para captura {self.id}. Ignorando resposta duplicada.")
+                    return
+                self.api_returned_200 = True
+                self.api_calls = 0
+
+                correct_reading = response.text.strip()
                 logging.info(f"API retornou 200 para captura {self.id}. Leitura correta: {correct_reading}")
-                track_instance.finalReading = correct_reading
-                track_instance.close()
-            
+                
+                with track_instance._lock:
+                    track_instance.finalReading = correct_reading
+
+                    if self.__class__.use_continuous_tries and not track_instance.closing:
+                        track_instance._start_async_close()
+
             elif response.status_code == 204:
+                if self.api_returned_200:
+                    logging.info(f"API já retornou 200 anteriormente para captura {self.id}. Ignorando resposta duplicada.")
+                    return
+                self.api_calls -= 1 
                 logging.info(f"API retornou 204 para captura {self.id}. Nenhuma leitura correspondeu. Continuando...")
             
             else:
@@ -89,71 +123,126 @@ class Tracking:
             logging.error(f"Falha ao chamar a API para captura {self.id}: {e}")
 
     def _update_and_call_api(self):
-        """Verifica novas placas possíveis e chama a API externa, se configurado."""
-
-        if self.__class__.reading_formats:
+        """
+        Verifica novas placas possíveis e chama a API externa, se configurado.
+        """
+        if self.__class__.format_converter is not None:
             original_readings = list(self.readings.keys())
-            converted_readings_dict = self.convert_readings_to_formats(self.__class__.reading_formats, original_readings, self.__class__.char_corrections)
-            
-            logging.info(f"Placas convertidas: {converted_readings_dict}")
+            converted_readings_dict = self.__class__.format_converter.convert(original_readings)
             
             updated_readings = self.readings.copy()
-            
             for original_plate, converted_readings in converted_readings_dict.items():
-                original_score = self.readings[original_plate]
+                original_score = self.readings.get(original_plate, 0)
                 for converted_plate in converted_readings:
                     updated_readings[converted_plate] = updated_readings.get(converted_plate, 0) + original_score
-            
             self.readings = updated_readings
 
-        defined_possible_readings = self.definePossibleReadings(self.readings)
-        
-        # --- LÓGICA ORIGINAL RESTAURADA ---
-        # Encontra novas leituras possíveis mantendo seu índice original para inserção
-        new_possible_readings = [[idx, x] for idx, x in enumerate(defined_possible_readings) if x not in self.possibleReadings]
-        
-        if new_possible_readings:
-            # Usa insert() para manter a ordem de prioridade exata da sua lógica original
-            for idx, plate in new_possible_readings:
-                self.possibleReadings.insert(idx, plate)
-            
-            # Chama a API se o endpoint estiver configurado, enviando somente as placas novas
-            if self.__class__.api_endpoint and self.__class__.use_continuous_tries:
-                # Extrai apenas os nomes das placas para o payload
-                plates_to_send = [plate for _, plate in new_possible_readings]
-                
-                payload = {
-                    "instance": self.__class__.instance_id,
-                    "readings": plates_to_send,
-                    "created": self.start_time.isoformat(),
-                    "capture_id": self.id
-                }
-                # Cria e inicia a thread para a chamada de API
-                api_thread = threading.Thread(target=self._call_api_async, args=(payload,))
-                api_thread.start()
+        defined_possible_readings = definePossibleReadings(self.readings)
+        defined_possible_readings = self.__class__.reading_filter_by_regex.filter_list(defined_possible_readings)
 
-    def close(self):
-        """
-        Finaliza o rastreamento, salva a imagem de captura e registra os dados.
-        """
-        if self.is_closing:
-            return
-        self.is_closing = True
+        # Para modo final, envia todas as leituras possíveis
+        if self.__class__.use_continuous_tries:
+            plates_to_send = [plate for plate in defined_possible_readings if plate not in self.possibleReadings]
+            if plates_to_send:
+                # Atualiza a lista para evitar reenvios
+                for plate in plates_to_send:
+                    if plate not in self.possibleReadings:
+                        self.possibleReadings.append(plate)
+        else:
+            plates_to_send = defined_possible_readings
+            self.possibleReadings = defined_possible_readings
 
-        # Tenta uma última atualização antes de fechar por timeout
-        if not self.__class__.use_continuous_tries:
-             self._update_and_call_api()
-
-        if not self.finalReading and self.possibleReadings:
+        if not self.__class__.api_endpoint and self.possibleReadings:
             self.finalReading = self.possibleReadings[0]
+            self._start_async_close()
+        elif plates_to_send and self.__class__.api_endpoint:
+            payload = {
+                "instance": self.__class__.instance_id,
+                "readings": plates_to_send,
+                "created": self.start_time.isoformat(),
+                "capture_id": self.id
+            }
 
-        logging.info("Leituras realizadas: %s", self.readings)
-        logging.info("Leituras possíveis: %s", self.possibleReadings)
+            api_thread = threading.Thread(target=self._call_api_async, args=(payload,))
+            api_thread.daemon = True  # Thread daemon para não bloquear o fechamento da aplicação
+            api_thread.start()
+
+    def _start_async_close(self):
+        """
+        Inicia o fechamento em uma thread separada.
+        """
+        if self.closed or self.closing:
+            return
+        self.closing = True
+
+        logging.info(f"Iniciando fechamento assíncrono da passagem {self.id}...")
+
+        close_thread = threading.Thread(target=self._async_close_worker)
+        close_thread.daemon = True
+        close_thread.start()
+
+    def _async_close_worker(self):
+        """
+        Worker que executa o fechamento em background.
+        Aguarda a API se necessário, mas não bloqueia o código principal.
+        """
+        try:
+            # Se não tem uso contínuo e tem API, faz uma última chamada
+            if not self.__class__.use_continuous_tries and self.__class__.api_endpoint:
+                logging.info(f"Fazendo chamada final à API para {self.id}")
+                self._update_and_call_api()
+
+            # Aguarda a API por no máximo 15 segundos se houver pendência
+            if self.api_calls > 0:
+                logging.info(f"Aguardando retorno da API para {self.id} (máximo 30s)")
+                timeout_start = time.time()
+                while (self.api_calls > 0 and (time.time() - timeout_start) < 30) and not self.api_returned_200:
+                    time.sleep(0.1)
+
+                if self.api_calls > 0:
+                    logging.warning(f"Timeout aguardando API para {self.id}. Prosseguindo com fechamento.")
+
+            # Executa o fechamento final
+            self._execute_final_close()
+
+        except Exception as e:
+            logging.error(f"Erro durante fechamento assíncrono de {self.id}: {e}")
+            # Garante que sempre será removido da memória
+            self._cleanup_tracking()
+
+    def _execute_final_close(self):
+        """
+        Executa o fechamento final e salva os dados.
+        """
+        with self._lock:
+            self.closing = True
+            self.api_calls = 0
+            if self.closed:
+                return
+            self.closed = True
+
+        # Se a API não definiu finalReading, usa a melhor local
+        if not self.finalReading and self.readings:
+            if not self.possibleReadings:
+                self.possibleReadings = self.__class__.reading_filter_by_regex.filter_list(definePossibleReadings(self.readings))
+            
+            if self.possibleReadings:
+                self.finalReading = self.possibleReadings[0]
+            else :
+                self.finalReading = '...'
+
+        duration = datetime.now() - self.start_time
+        logging.info(f"Finalizando passagem {self.id} (duração: {duration.total_seconds():.2f}s)")
+
+
+        logging.info(f"Leituras realizadas para {self.id}: {dict(self.readings)}")
+        logging.info(f"Leituras possíveis para {self.id}: {self.possibleReadings}")
+        logging.info(f"Leitura final para {self.id}: {self.finalReading}")
         
-        logging.info(f"Finalizando passagem {self.id} com leitura final: {self.finalReading}")
-        
+        # Salva a imagem
         image_path = self._save_capture_image()
         
+        # Prepara dados para salvar no banco
         tracking_data = {
             'id': self.id,
             'instance_id': self.__class__.instance_id,
@@ -163,11 +252,27 @@ class Tracking:
             'possibleReadings': self.possibleReadings,
         }
         
+        # Salva no banco de dados
         if self.__class__.db_manager:
-            self.__class__.db_manager.save_tracking(tracking_data)
+            try:
+                self.__class__.db_manager.save_tracking(tracking_data)
+                logging.info(f"Dados salvos no banco para {self.id}")
+            except Exception as e:
+                logging.error(f"Erro ao salvar no banco para {self.id}: {e}")
 
+        # Salva detecções suspeitas
         self.__class__.save_suspect_detections()
         
+        # Remove da memória
+        if self.leftTheFrame:
+            logging.info(f"Passagem {self.id} completamente finalizada e removida da memória.")
+            self._cleanup_tracking()
+
+    def _cleanup_tracking(self):
+        """
+        Remove o tracking das listas de memória.
+        """
+        logging.info(f"Removendo passagem {self.id} da memória.")
         self.__class__.trackings.pop(self.id, None)
 
     def _save_capture_image(self) -> str | None:
@@ -175,12 +280,13 @@ class Tracking:
         Escolhe o melhor frame e salva a imagem.
         """
         if not self.frames or self.__class__.captures_save_path is None:
-            logging.warning(f"Nenhum frame para salvar ou caminho de capturas não configurado para o tracking {self.id}.")
+            logging.warning(f"Nenhum frame para salvar ou caminho não configurado para {self.id}")
             return None
         
         try:
-            best_frame = self.chooseBestFrame(self.frames)
+            best_frame = chooseBestFrame(self.frames, self.finalReading)
             if not best_frame:
+                logging.warning(f"Não foi possível escolher melhor frame para {self.id}")
                 return None
 
             now = datetime.now()
@@ -190,188 +296,82 @@ class Tracking:
             x1, y1, x2, y2 = best_frame['plate_bounding_box']
             input_name = best_frame['input_name']
             
-            filename = f"{self.finalReading} {input_name} {x1}-{y1}-{x2}-{y2} {self.id}.jpg"
+            # Garante que a placa final não seja vazia no nome do arquivo
+            filename_plate = self.finalReading if self.finalReading else "SEM_LEITURA"
+            
+            filename = f"{filename_plate} {input_name} {x1}-{y1}-{x2}-{y2} {self.id}.jpg"
             final_path = folder_path / filename
             
             cv2.imwrite(str(final_path), best_frame['input_frame'])
-            logging.info(f"Captura salva para placa {self.finalReading} em '{final_path}'")
+            logging.info(f"Captura salva para {self.id} em '{final_path}'")
             return str(final_path)
 
         except (IOError, cv2.error, KeyError, Exception) as e:
-            logging.error(f"Erro ao salvar imagem de captura para o tracking {self.id}: {e}")
+            logging.error(f"Erro ao salvar imagem para {self.id}: {e}")
             return None
-    
-    def chooseBestFrame(self, frames: list) -> dict | None:
-        """
-        Seleciona o melhor frame com uma lógica de fallback progressiva.
-
-        1. Tenta encontrar frames com distância de Levenshtein <= 2.
-        2. Se não encontrar, tenta com distância <= 3.
-        3. Se não encontrar, tenta com distância <= 4.
-        4. Se ainda assim não encontrar nenhum, ignora o filtro de texto e
-        usa a lista de frames original completa.
-        
-        Após a filtragem, seleciona o frame com a placa mais próxima ao
-        centro da imagem. Isso garante que um frame sempre seja retornado,
-        desde que a lista inicial não esteja vazia.
-        """
-        if not frames:
-            return None
-
-        candidate_frames = []
-        # Loop de tentativas com distâncias progressivas
-        for max_distance in [2, 3, 4]:
-            # Filtra os frames para a distância atual
-            for frame in frames:
-                try:
-                    reading_text = frame.get('reading', '')
-                    if levenshtein(self.finalReading, reading_text) <= max_distance:
-                        candidate_frames.append(frame)
-                except Exception as e:
-                    logging.warning(f"Erro ao processar o texto do frame na filtragem (distância {max_distance}): {e}")
-                    continue
-            
-            # Se encontramos candidatos, paramos de procurar e usamos essa lista
-            if candidate_frames:
-                # logging.info(f"Encontrados {len(candidate_frames)} frames candidatos com distância Levenshtein <= {max_distance}.")
-                break
-
-        # --- FALLBACK FINAL ---
-        # Se, após todas as tentativas, a lista de candidatos ainda estiver vazia,
-        # usamos a lista original de frames como candidata.
-        # O importante é não ficar sem salvar.
-        if not candidate_frames:
-            # logging.warning("Nenhum frame encontrado com Levenshtein <= 4. Usando todos os frames para critério de centralização.")
-            candidate_frames = frames
-
-        # Agora, aplicamos a lógica de encontrar o mais centralizado
-        # na lista de candidatos que foi definida (seja por Levenshtein ou pelo fallback)
-        best_frame = None
-        min_distance = float('inf')
-
-        for frame in candidate_frames:
-            try:
-                height, width = frame['input_frame'].shape[:2]
-                image_center_x, image_center_y = width / 2, height / 2
-
-                x1, y1, x2, y2 = frame['plate_bounding_box']
-                bbox_center_x, bbox_center_y = (x1 + x2) / 2, (y1 + y2) / 2
-                
-                distance = ((bbox_center_x - image_center_x) ** 2 + (bbox_center_y - image_center_y) ** 2) ** 0.5
-
-                if distance < min_distance:
-                    min_distance = distance
-                    best_frame = frame
-            except (KeyError, TypeError) as e:
-                logging.warning(f"Frame candidato malformado ao calcular distância: {e}")
-                continue
-
-        return best_frame
-
-    def definePossibleReadings(self, plates: dict) -> list:
-        """
-        Algoritmo para pontuar e classificar as leituras de placas.
-        """
-        plate_pontuation = defaultdict(int)
-
-        for plate in plates.keys():
-            substrings = {
-                plate[j:j + i]
-                for i in range(2, len(plate) + 1)
-                for j in range(len(plate) - i + 1)
-            }
-            for substring in substrings:
-                for reading, count in plates.items():
-                    if substring in reading:
-                        plate_pontuation[plate] += plates[plate]
-
-        top_plates = sorted(plate_pontuation, key=plate_pontuation.get, reverse=True)[:2]
-        return top_plates
     
     # --- Métodos de Classe ---
-
-    def convert_readings_to_formats(self, formats: List[str], plates: List[str], conv: Dict[str, List[str]]) -> Dict[str, List[str]]:
-        # Este método permanece inalterado
-        def is_letter(c: str) -> bool: return c.isalpha()
-        def is_digit(c: str) -> bool: return c.isdigit()
-        def fits_token(ch: str, token: str) -> bool:
-            if token == 'L': return is_letter(ch)
-            if token == 'N': return is_digit(ch)
-            raise ValueError(f"Token inválido: {token}")
-        formats_by_len: Dict[int, List[str]] = {}
-        for f in formats: formats_by_len.setdefault(len(f), []).append(f)
-        resultados: Dict[str, List[str]] = {}
-        for plate in plates:
-            fmt_list = formats_by_len.get(len(plate), [])
-            if not fmt_list: continue
-            variantes_set = set()
-            for fmt in fmt_list:
-                mismatch_positions, candidate_lists = [], []
-                ok_entire = True
-                for i, tok in enumerate(fmt):
-                    ch = plate[i]
-                    if fits_token(ch, tok): continue
-                    ok_entire = False
-                    cand = conv.get(ch)
-                    if not cand: candidate_lists = []; break
-                    cand_ok = [c for c in cand if fits_token(c, tok)]
-                    if not cand_ok: candidate_lists = []; break
-                    mismatch_positions.append(i)
-                    candidate_lists.append(cand_ok)
-                if ok_entire: continue
-                if not candidate_lists: continue
-                base = list(plate)
-                for combo in product(*candidate_lists):
-                    buff = base[:]
-                    for pos, val in zip(mismatch_positions, combo): buff[pos] = val
-                    variantes_set.add(''.join(buff))
-            if variantes_set: resultados[plate] = list(variantes_set)
-        return resultados
     
     @classmethod
     def setup(cls, db_manager, instance_id: str, captures_save_path: str, 
               suspect_detections_save_path: str, use_continuous_tries: bool = False, 
-              reading_formats: list = None, char_corrections: dict = None,
-              api_endpoint: str = None):
+              reading_formats: list = None, readings_filter_regex: str = None, char_corrections: dict = None,
+              api_endpoint: str = None, api_user: str = None, api_password: str = None):
+        """Configura o módulo de Tracking com os parâmetros necessários."""
         cls.db_manager = db_manager
         cls.instance_id = instance_id
         cls.captures_save_path = Path(captures_save_path) if captures_save_path else None
         cls.suspect_detections_save_path = Path(suspect_detections_save_path) if suspect_detections_save_path else None
         cls.use_continuous_tries = use_continuous_tries
-        cls.reading_formats = reading_formats
-        cls.char_corrections = char_corrections or {}
-        cls.api_endpoint = api_endpoint
+
+        cls.reading_filter_by_regex = RegexValidator(readings_filter_regex)
+        cls.format_converter = FormatConverter(reading_formats, char_corrections or {}) if reading_formats else None
         
-        if cls.captures_save_path: cls.captures_save_path.mkdir(parents=True, exist_ok=True)
-        if cls.suspect_detections_save_path: cls.suspect_detections_save_path.mkdir(parents=True, exist_ok=True)
+        cls.api_endpoint = api_endpoint
+        cls.api_user = api_user
+        cls.api_password = api_password
+
+        # Se usuário e senha forem fornecidos, cria o auth
+        cls.auth = (api_user, api_password) if api_user and api_password else None
+
+        if cls.captures_save_path: 
+            cls.captures_save_path.mkdir(parents=True, exist_ok=True)
+        if cls.suspect_detections_save_path: 
+            cls.suspect_detections_save_path.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def newFrame(cls):
         """
         Método chamado a cada novo frame para gerenciar os trackings.
+        Para continuous_tries, trackings fechados permanecem até timeout natural.
         """
         if not cls.trackings:
             return
 
+        # Trabalha com trackings ativos
         for track in list(cls.trackings.values()):
             track.noFrameCount += 1
 
-            if track.noFrameCount > 5 and not track.is_closing:
-                logging.info(f"A passagem {track.id} excedeu o limite de frames sem detecção.")
+            if track.noFrameCount > 10:
+                track.leftTheFrame = True
+                logging.info(f"Passagem {track.id} excedeu limite de frames (timeout)")
                 
-                duration = datetime.now() - track.start_time
-                logging.info(f"A captura (timeout) levou {duration.total_seconds():.2f} segundos.")
-                
-                track.close()
+                # Se já está fechando (continuous_tries), apenas move para closing_trackings
+                if not track.closing:
+                    track._start_async_close()
+                elif track.api_calls == 0:
+                    track._cleanup_tracking()
 
     @classmethod
     def save_suspect_detections(cls):
-        # Este método permanece inalterado
-        if not cls.suspect_detections: return
+        """Salva detecções suspeitas em disco."""
+        if not cls.suspect_detections: 
+            return
         if not cls.suspect_detections_save_path:
-            logging.warning("Caminho para salvar detecções suspeitas não configurado.")
+            logging.warning("Caminho para detecções suspeitas não configurado.")
             cls.suspect_detections = []
             return
+        
         logging.info(f"Salvando {len(cls.suspect_detections)} detecções suspeitas.")
         for detection in cls.suspect_detections:
             try:
@@ -384,6 +384,6 @@ class Tracking:
                 filepath = cls.suspect_detections_save_path / filename
                 cv2.imwrite(str(filepath), frame)
             except (KeyError, cv2.error, Exception) as e:
-                logging.error(f"Não foi possível salvar detecção suspeita: {e}")
+                logging.error(f"Erro ao salvar detecção suspeita: {e}")
                 continue
         cls.suspect_detections = []

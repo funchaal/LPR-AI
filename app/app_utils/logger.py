@@ -2,6 +2,7 @@ import logging
 import sys
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+import os
 
 # Um formato de log mais completo que inclui o nome do processo,
 # o que é extremamente útil para depurar aplicações multiprocesso.
@@ -15,6 +16,7 @@ def setup_logger(logs_save_dir: Path):
     para garantir que todos configurem o logging da mesma forma.
     """
     # Pega o logger raiz. Todos os loggers da aplicação herdarão dele.
+    os.makedirs(logs_save_dir, exist_ok=True)
     logger = logging.getLogger()
 
     # Define o nível mínimo de log que será processado.

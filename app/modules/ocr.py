@@ -1,15 +1,14 @@
 # modules/ocr.py
-
-from paddleocr import PaddleOCR
+from paddleocr import TextRecognition, TextDetection
 import logging
+import os
 
-def init_ocr(det_model_dir, rec_model_dir, cls_model_dir=None, use_angle_cls=False, use_det=True, char_dict_file=None, device='cpu', **kwargs):
+
+def init_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict_file=None, **kwargs):
     """
-    Inicializa o PaddleOCR usando o backend PADRÃO (não OpenVINO).
+    Inicializa o PaddleOCR 3.0 usando as novas classes TextDetection e TextRecognition.
     Este script é chamado pelo main.py somente quando OCR_BACKEND='paddle'.
-
-    Ele configura o uso de CPU ou GPU com base no parâmetro 'device'.
-
+    
     Args:
         det_model_dir (str): Caminho para o modelo de detecção.
         rec_model_dir (str): Caminho para o modelo de reconhecimento.
@@ -17,36 +16,166 @@ def init_ocr(det_model_dir, rec_model_dir, cls_model_dir=None, use_angle_cls=Fal
         use_angle_cls (bool, optional): Se deve usar a classificação de ângulo.
         use_det (bool, optional): Se deve usar o modelo de detecção.
         char_dict_file (str, optional): Caminho para o arquivo de dicionário de caracteres.
-        device (str, optional): O dispositivo de computação ('cpu' ou 'cuda'). Default 'cpu'.
-        **kwargs: Aceita argumentos extras para compatibilidade (como 'backend') que não serão usados.
+        device (str, optional): O dispositivo de computação ('cpu', 'gpu:0', 'gpu:1', etc.). Default 'cpu'.
+        **kwargs: Aceita argumentos extras para compatibilidade.
+    
+    Returns:
+        OCRWrapper: Wrapper que fornece interface compatível com o código existente.
     """
-    use_gpu = False
-    if device == 'cuda':
-        use_gpu = True
-        logging.info("Configurando PaddleOCR para usar o backend Paddle com GPU (CUDA).")
-    else:
-        logging.info("Configurando PaddleOCR para usar o backend Paddle com CPU.")
-        
+
+    if device == 'cpu':
+        try:
+            from modules.openvino_ocr import init_openvino_ocr
+            logging.info("Dispositivo 'cpu' detectado. Redirecionando para inicializador de OpenVINO OCR.")
+            return init_openvino_ocr(
+                det_model_dir=det_model_dir,
+                rec_model_dir=rec_model_dir,
+                use_det=use_det,
+                char_dict_file=char_dict_file
+            )
+        except Exception as e:
+            logging.error(f"Erro ao inicializar OpenVINO OCR: {e}.")
+            logging.info(f"Seguindo com inferencia normal do PaddleOCR.")
+    
+    logging.info(f"Inicializando PaddleOCR 3.2.0 com device: {device}")
+    
+    # Inicializa o detector de texto se necessário
+    text_detector = None
+    if use_det:
+        try:
+            if not det_model_dir:
+                logging.info("Nenhum modelo de detecção personalizado fornecido. Usando modelo padrão.")
+                text_detector = TextDetection(model_name='PP-OCRv5_mobile_det', device=device, enable_hpi=False, use_tensorrt=True)
+            else:
+                det_model_name = os.path.basename(det_model_dir)
+                text_detector = TextDetection(model_name=det_model_name, device=device, model_dir=det_model_dir, enable_hpi=False, use_tensorrt=True)
+                logging.info(f"TextDetection inicializado com modelo customizado: {det_model_name}")
+        except Exception as e:
+            logging.error(f"Erro ao inicializar TextDetection: {e}")
+            raise
+
+    # Inicializa o reconhecedor de texto
     try:
-        ocr = PaddleOCR(
-            use_angle_cls=use_angle_cls,
-            use_det=use_det,
-            use_rec=True,
-            lang="en", 
-            det=use_det, 
-            det_model_dir=det_model_dir if use_det else None,
-            rec_model_dir=rec_model_dir,
-            cls_model_dir=cls_model_dir if use_angle_cls else None,
-            
-            # --- Configurações de Dispositivo ---
-            use_gpu=use_gpu, 
-            use_fp16=False
-                    )
-        logging.info("Instância do PaddleOCR (backend padrão) inicializada com sucesso.")
-        return ocr
+        if not rec_model_dir:
+            logging.info("Nenhum modelo de reconhecimento personalizado fornecido. Usando modelo padrão.")
+            text_recognizer = TextRecognition(model_name='en_PP-OCRv5_mobile_rec', device=device, enable_hpi=False, use_tensorrt=True)
+        else:
+            rec_model_name = os.path.basename(rec_model_dir)
+            text_recognizer = TextRecognition(model_name=rec_model_name, device=device, model_dir=rec_model_dir, enable_hpi=False, use_tensorrt=True)
+            logging.info(f"TextRecognition inicializado com modelo customizado: {rec_model_name}")
     except Exception as e:
-        logging.error(f"Erro ao inicializar OCR do backend Paddle: {e}")
-        if "Cannot load GPU library" in str(e) or "CUBLAS" in str(e):
-            logging.error("ERRO CRÍTICO: O PaddlePaddle-GPU não conseguiu encontrar as bibliotecas CUDA.")
-            logging.error("Verifique se o NVIDIA Driver, CUDA Toolkit e cuDNN estão instalados corretamente.")
+        logging.error(f"Erro ao inicializar TextRecognition: {e}")
         raise
+
+    
+    # Retorna wrapper que mantém compatibilidade com a interface antiga
+    return OCRWrapper(
+        text_detector=text_detector,
+        text_recognizer=text_recognizer,
+        use_det=use_det
+    )
+
+class OCRWrapper:
+    """
+    Wrapper que mantém compatibilidade com a interface do PaddleOCR antigo
+    enquanto usa internamente as novas classes TextDetection e TextRecognition.
+    """
+    
+    def __init__(self, text_detector, text_recognizer, use_det=True):
+        self.text_detector = text_detector
+        self.text_recognizer = text_recognizer
+        self.use_det = use_det
+    
+    def ocr(self, img):
+        """
+        Método principal que mantém compatibilidade com a interface antiga do PaddleOCR.
+        
+        Args:
+            img: Imagem para processar
+            det (bool): Se deve usar detecção de texto
+            cls (bool): Se deve usar classificação de ângulo (não implementado na nova versão)
+            
+        Returns:
+            Lista no formato compatível com PaddleOCR antigo
+        """
+        
+        if self.use_det and self.text_detector:
+            # Modo com detecção: primeiro detecta, depois reconhece cada região
+            try:
+                # Detecta regiões de texto
+                detection_results = self.text_detector.predict(img)
+                
+                if not detection_results or len(detection_results) == 0:
+                    logging.debug("Nenhuma região de texto detectada")
+                    return [[]]
+                
+                # Lista para armazenar resultados no formato antigo
+                ocr_results = []
+                
+                for detection_result in detection_results:
+                    # Extrai as coordenadas da detecção
+                    try:
+                        # O formato pode variar, vamos tentar diferentes formatos
+                        if detection_result.get('bbox') is not None:
+                            # Usa a bounding box para fazer crop da imagem
+                            bbox = detection_result.bbox
+                            
+                            # Converte coordenadas para inteiros
+                            x1, y1, x2, y2 = map(int, [
+                                min(bbox[0], bbox[2]), min(bbox[1], bbox[3]),
+                                max(bbox[0], bbox[2]), max(bbox[1], bbox[3])
+                            ])
+                            
+                            # Faz crop da região detectada
+                            if x2 > x1 and y2 > y1:
+                                text_region = img[y1:y2, x1:x2]
+                                
+                                # Reconhece o texto na região
+                                recognition_results = self.text_recognizer.predict(text_region)
+                                
+                                if recognition_results and len(recognition_results) > 0:
+                                    recognition_result = recognition_results[0]
+                                    
+                                    # Extrai texto e confiança
+                                    text = recognition_result.get('rec_text', '')
+                                    confidence = recognition_result.get('rec_score', 0.0)
+                                    
+                                    # Formato compatível: [coordenadas, (texto, confiança)]
+                                    formatted_result = [
+                                        [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],  # coordenadas
+                                        (text, confidence)  # texto e confiança
+                                    ]
+                                    ocr_results.append(formatted_result)
+                        
+                    except Exception as e:
+                        logging.warning(f"Erro ao processar região detectada: {e}")
+                        continue
+                
+                return [ocr_results] if ocr_results else [[]]
+                
+            except Exception as e:
+                logging.error(f"Erro durante detecção: {e}")
+                return [[]]
+        
+        else:
+            # Modo sem detecção: reconhece diretamente a imagem inteira
+            try:
+                recognition_results = self.text_recognizer.predict(img)
+                
+                if not recognition_results or len(recognition_results) == 0:
+                    logging.debug("Nenhum texto reconhecido")
+                    return [[]]
+                
+                # Pega o primeiro resultado
+                recognition_result = recognition_results[0]
+
+                # Extrai texto e confiança
+                text = recognition_result.get('rec_text', '')
+                confidence = recognition_result.get('rec_score', 0.0)
+                
+                # Formato compatível para modo sem detecção
+                return [[(text, confidence)]]
+                
+            except Exception as e:
+                logging.error(f"Erro durante reconhecimento: {e}")
+                return [[]]

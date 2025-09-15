@@ -8,7 +8,7 @@ from ultralytics import YOLO
 # Ponto 3: Usando import relativo para robustez, buscando o config.py no diretório pai (app/)
 from app_utils.config import settings, APP_DIR
 
-def ensure_best_model() -> Path:
+def ensure_best_model(device) -> Path:
     """
     Verifica o ambiente e garante que o melhor modelo (otimizado ou base) esteja pronto para uso.
     """
@@ -23,7 +23,7 @@ def ensure_best_model() -> Path:
     # --- LÓGICA DE SELEÇÃO DE BACKEND ---
 
     # CASO 1: Dispositivo é CUDA, otimizar para TensorRT
-    if settings.COMPUTE_DEVICE == 'cuda':
+    if 'gpu' in device:
         engine_dir = APP_DIR / 'models' / 'plate' / 'engine'
         engine_path = engine_dir / (model_stem + '.engine')
         engine_dir.mkdir(parents=True, exist_ok=True)
@@ -44,7 +44,7 @@ def ensure_best_model() -> Path:
             return base_model_path
 
     # CASO 2: Dispositivo é CPU, otimizar para OpenVINO
-    elif settings.COMPUTE_DEVICE == 'cpu':
+    elif device == 'cpu':
         # Ponto 1: Usa o nome PADRÃO que a Ultralytics gera (ex: nome_openvino_model)
         # Isso é mais seguro e evita quebrar referências internas do modelo.
         ov_model_dir_name = model_stem + '_openvino_model'
@@ -75,5 +75,5 @@ def ensure_best_model() -> Path:
 
     # CASO 3: Fallback
     else:
-        logging.info(f"Nenhuma otimização para '{settings.COMPUTE_DEVICE}'. Usando .pt padrão.")
+        logging.info(f"Nenhuma otimização para '{device}'. Usando .pt padrão.")
         return base_model_path

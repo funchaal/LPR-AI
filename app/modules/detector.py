@@ -16,7 +16,7 @@ def load_yolo(model_path: Path) -> YOLO:
     """
     try:
         # O 'task' é inferido automaticamente a partir de modelos .engine
-        model = YOLO(model_path)
+        model = YOLO(model_path, task='detect')
         logging.info(f"Modelo YOLO carregado com sucesso de '{model_path}'")
         return model
     except Exception as e:
