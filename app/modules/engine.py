@@ -19,7 +19,7 @@ from app_utils.logger import setup_logger
 from modules.ocr import init_ocr
 
 from app_utils.config import _validate_and_normalize_device  # Importa o objeto de configurações já validado
-from app_utils.model_optimizer import ensure_best_model
+from app.app_utils.optimize_yolo_model import ensure_best_model
 
 # Importa a instância única de configurações do arquivo config.py
 from app_utils.config import settings
@@ -27,7 +27,7 @@ from app_utils.config import settings
 # Garante a compatibilidade com certas bibliotecas de deep learning em alguns ambientes
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-def process_source(instance_id: str, input_name: str, input_endpoint: str, input_user: str = None, input_password: str = None, polygons: list = None, device: str = 'cpu'):
+def process_source(instance_id: str, input_name: str, input_endpoint: str, input_user: str = None, input_password: str = None, polygons: list = None, yolo_device: str = 'cpu', ocr_device: str = 'cpu'):
     """
     Processa uma única fonte de vídeo, desde a captura até a análise e salvamento.
     Esta função contém o loop principal de processamento de frames.
@@ -41,28 +41,28 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
         device (str, optional): Dispositivo de computação a ser usado ('cpu', 'gpu:0', etc.). Defaults to 'cpu'.
     """
     # Configura o logger para este processo específico
+
     setup_logger(settings.LOGS_SAVE_DIR)
 
     logging.info(f"[{input_name}] Iniciando processo para instância '{instance_id}'")
 
-    validated_device = _validate_and_normalize_device(device)
+    yolo_validated_device = _validate_and_normalize_device(yolo_device)
+    yolo_inference_device = '0' if yolo_validated_device == 'gpu' else yolo_validated_device.replace('gpu:', '')
 
-    optimized_model_path = ensure_best_model(validated_device)
-    
     # Carrega modelo YOLO (detecção de placas)
-    model = load_yolo(optimized_model_path)
+    model = load_yolo(settings.BASE_PLATE_MODEL, yolo_validated_device)
 
-    yolo_device = '0' if validated_device == 'gpu' else validated_device.replace('gpu:', '')
-    
-    common_args = {
+    ocr_validated_device = _validate_and_normalize_device(ocr_device)
+
+    ocr_common_args = {
         'det_model_dir': str(settings.OCR_DETECTION_MODEL) if settings.OCR_DETECTION_MODEL else None,
         'rec_model_dir': str(settings.OCR_RECOGNITION_MODEL) if settings.OCR_RECOGNITION_MODEL else None,
         'use_det': settings.USE_OCR_DETECTION,
-        'device': validated_device, 
+        'device': ocr_validated_device, 
         'char_dict_file': settings.OCR_CHAR_DICT_FILE
     }
 
-    ocr = init_ocr(**common_args)
+    ocr = init_ocr(**ocr_common_args)
     
     setup_logger(settings.LOGS_SAVE_DIR)
 
@@ -119,8 +119,8 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
         
         # Chama newFrame para gerenciar timeouts dos trackings
         Tracking.newFrame()
-        
-        results = model.predict(processed_frame, device=yolo_device, verbose=False)
+
+        results = model.predict(processed_frame, device=yolo_inference_device, verbose=False)
         frame_id = None
         
         if results and results[0].boxes:

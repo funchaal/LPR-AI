@@ -99,11 +99,18 @@ class OCR:
             last_char_idx = 0
             for i in range(len(preds_idx)):
                 char_idx = preds_idx[i]
+            
                 if char_idx > 0 and char_idx != last_char_idx:
-                    text += self.character[char_idx]
-                    score += preds_prob[i]
-                    count += 1
+                
+                    char = self.character[char_idx]
+                
+                    if char != 'unk':
+                        text += char
+                        score += preds_prob[i]
+                        count += 1
+
                 last_char_idx = char_idx
+            
             texts.append(text)
             scores.append(score / count if count > 0 else 0.0)
         return texts, scores
@@ -273,18 +280,9 @@ def init_openvino_ocr(det_model_dir=None, rec_model_dir=None, use_det=True, char
     Função de fábrica para inicializar e retornar um objeto OCR.
     """
 
-    def to_openvino_path(model_dir: str) -> str | None:
-        if not model_dir:
-            return None
-        model_name = os.path.basename(model_dir)
-        return os.path.join(model_dir.replace("paddlepaddle", "openvino"), model_name + ".xml")
-
-    openvino_det_model_dir = to_openvino_path(det_model_dir)
-    openvino_rec_model_dir = to_openvino_path(rec_model_dir)
-
     ocr_engine = OCR(
-        det_model_dir=str(openvino_det_model_dir),
-        rec_model_dir=str(openvino_rec_model_dir),
+        det_model_dir=str(det_model_dir),
+        rec_model_dir=str(rec_model_dir),
         use_det=use_det,
         char_dict_path=char_dict_file
     )

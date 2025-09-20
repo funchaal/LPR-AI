@@ -29,17 +29,18 @@ def main():
 
     for input_name, data in settings.INPUT_SOURCES.items():
         instance_id = data["instance"]
-        input_endpoint = data["input_endpoint"]
+        input_endpoint = data["input-endpoint"]
         input_user = data.get("username")
         input_password = data.get("password")
         polygons = data.get("polygons")
-        device = data["device"]
+        yolo_device = data["yolo-device"]
+        ocr_device = data["ocr-device"]
 
         logging.info(f"Criando processo para: '{input_name}' (Fonte: {input_endpoint})")
 
         process = Process(
             target=process_source,
-            args=(instance_id, input_name, input_endpoint, input_user, input_password, polygons, device)
+            args=(instance_id, input_name, input_endpoint, input_user, input_password, polygons, yolo_device, ocr_device)
         )
         processes.append(process)
         process.start()

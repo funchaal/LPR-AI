@@ -2,6 +2,7 @@
 from paddleocr import TextRecognition, TextDetection
 import logging
 import os
+from app_utils.optimize_ocr_model import optimize_ocr_model
 
 
 def init_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict_file=None, **kwargs):
@@ -22,20 +23,31 @@ def init_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict
     Returns:
         OCRWrapper: Wrapper que fornece interface compatível com o código existente.
     """
-
+    
+    # Otimiza modelos baseado no dispositivo
     if device == 'cpu':
         try:
-            from modules.openvino_ocr import init_openvino_ocr
-            logging.info("Dispositivo 'cpu' detectado. Redirecionando para inicializador de OpenVINO OCR.")
-            return init_openvino_ocr(
-                det_model_dir=det_model_dir,
-                rec_model_dir=rec_model_dir,
-                use_det=use_det,
-                char_dict_file=char_dict_file
-            )
+            # Tenta otimizar os modelos para OpenVINO
+            optimized_det_model = optimize_ocr_model(det_model_dir, device) if det_model_dir else None
+            optimized_rec_model = optimize_ocr_model(rec_model_dir, device) if rec_model_dir else None
+            
+            # Se conseguiu otimizar para OpenVINO, usa o init_openvino_ocr
+            if ((optimized_det_model and optimized_det_model.endswith('.xml')) or not det_model_dir) and \
+               (optimized_rec_model and optimized_rec_model.endswith('.xml')):
+                
+                from modules.openvino_ocr import init_openvino_ocr
+                logging.info("Usando OpenVINO OCR otimizado para CPU")
+                
+                return init_openvino_ocr(
+                    det_model_dir=optimized_det_model,
+                    rec_model_dir=optimized_rec_model,
+                    use_det=use_det,
+                    char_dict_file=char_dict_file
+                )
+                
         except Exception as e:
-            logging.error(f"Erro ao inicializar OpenVINO OCR: {e}.")
-            logging.info(f"Seguindo com inferencia normal do PaddleOCR.")
+            logging.error(f"Erro ao inicializar OCR otimizado: {e}")
+            logging.info("Seguindo com PaddleOCR padrão")
     
     logging.info(f"Inicializando PaddleOCR 3.2.0 com device: {device}")
     
@@ -66,7 +78,6 @@ def init_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict
     except Exception as e:
         logging.error(f"Erro ao inicializar TextRecognition: {e}")
         raise
-
     
     # Retorna wrapper que mantém compatibilidade com a interface antiga
     return OCRWrapper(
