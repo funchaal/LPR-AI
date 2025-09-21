@@ -3,3 +3,4 @@ venv/
 captures/
 db/
 suspect_detections/
+app/dev/
