@@ -1,11 +1,10 @@
 import logging
 import shutil
-import os
 from pathlib import Path
 from ultralytics import YOLO
 
 # Ponto 3: Usando import relativo para robustez, buscando o config.py no diretório pai (app/)
-from app_utils.config import settings, APP_DIR
+from app_utils.config import APP_DIR
 
 def yolo2tensorrt(yolo_model_path, output_base_dir=None):
     """

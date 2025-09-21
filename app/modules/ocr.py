@@ -3,6 +3,7 @@ from paddleocr import TextRecognition, TextDetection
 import logging
 import os
 from app_utils.optimize_ocr_model import optimize_ocr_model
+from app_utils.config import settings
 
 
 def init_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict_file=None, **kwargs):
@@ -53,14 +54,16 @@ def init_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict
     
     # Inicializa o detector de texto se necessário
     text_detector = None
+    use_tensorrt = (device == 'gpu') if settings.USE_OCR_TENSORRT else False
+    use_hpi = settings.USE_OCR_HPI
     if use_det:
         try:
             if not det_model_dir:
                 logging.info("Nenhum modelo de detecção personalizado fornecido. Usando modelo padrão.")
-                text_detector = TextDetection(model_name='PP-OCRv5_mobile_det', device=device, enable_hpi=False, use_tensorrt=True)
+                text_detector = TextDetection(model_name='PP-OCRv5_mobile_det', device=device, enable_hpi=False, use_tensorrt=False)
             else:
                 det_model_name = os.path.basename(det_model_dir)
-                text_detector = TextDetection(model_name=det_model_name, device=device, model_dir=det_model_dir, enable_hpi=False, use_tensorrt=True)
+                text_detector = TextDetection(model_name=det_model_name, device=device, model_dir=det_model_dir, enable_hpi=use_hpi, use_tensorrt=use_tensorrt)
                 logging.info(f"TextDetection inicializado com modelo customizado: {det_model_name}")
         except Exception as e:
             logging.error(f"Erro ao inicializar TextDetection: {e}")
@@ -70,10 +73,10 @@ def init_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict
     try:
         if not rec_model_dir:
             logging.info("Nenhum modelo de reconhecimento personalizado fornecido. Usando modelo padrão.")
-            text_recognizer = TextRecognition(model_name='en_PP-OCRv5_mobile_rec', device=device, enable_hpi=False, use_tensorrt=True)
+            text_recognizer = TextRecognition(model_name='en_PP-OCRv5_mobile_rec', device=device, enable_hpi=False, use_tensorrt=False)
         else:
             rec_model_name = os.path.basename(rec_model_dir)
-            text_recognizer = TextRecognition(model_name=rec_model_name, device=device, model_dir=rec_model_dir, enable_hpi=False, use_tensorrt=True)
+            text_recognizer = TextRecognition(model_name=rec_model_name, device=device, model_dir=rec_model_dir, enable_hpi=use_hpi, use_tensorrt=use_tensorrt)
             logging.info(f"TextRecognition inicializado com modelo customizado: {rec_model_name}")
     except Exception as e:
         logging.error(f"Erro ao inicializar TextRecognition: {e}")

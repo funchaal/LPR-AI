@@ -24,61 +24,6 @@ def get_env_bool(env_var: str, default: bool = False) -> bool:
 def get_env_int(env_var: str, default: int = 0) -> int:
     return int(os.getenv(env_var, str(default)))
 
-import logging
-import torch
-
-def _validate_and_normalize_device(requested_device: str) -> str:
-    """
-    Valida e normaliza um dispositivo solicitado ('cpu', 'gpu:0', etc.).
-    Se a GPU solicitada não estiver disponível, tenta GPUs anteriores ou cai em 'cpu'.
-
-    Args:
-        requested_device (str): O dispositivo solicitado.
-
-    Returns:
-        str: Dispositivo validado e normalizado ('cpu' ou 'gpu:X').
-    """
-    device_str = requested_device.lower().strip()
-
-    # Se não for GPU, retorna 'cpu' diretamente
-    if not any(k in device_str for k in ['cuda', 'gpu']):
-        logging.debug(f"Dispositivo '{requested_device}' validado como 'cpu'.")
-        return "cpu"
-
-    # Checa se há suporte a GPU
-    is_gpu_available = torch.cuda.is_available()
-    is_paddle_gpu_version = False
-    try:
-        import paddle
-        is_paddle_gpu_version = paddle.is_compiled_with_cuda()
-    except Exception:
-        pass
-
-    logging.debug(f"Validando dispositivo GPU '{requested_device}'...")
-    logging.debug(f"  - Hardware (NVIDIA): {'SIM' if is_gpu_available else 'NÃO'}")
-    logging.debug(f"  - Software (Paddle GPU): {'SIM' if is_paddle_gpu_version else 'NÃO'}")
-
-    if not (is_gpu_available and is_paddle_gpu_version):
-        logging.warning(f"AVISO: GPU não disponível ou Paddle não compilado com CUDA. Revertendo para 'cpu'.")
-        return "cpu"
-
-    # Extrai o índice da GPU solicitada
-    try:
-        gpu_index = int(device_str.split(':')[1]) if ':' in device_str else 0
-    except ValueError:
-        gpu_index = 0
-
-    # Tenta encontrar uma GPU válida, recuando se necessário
-    while gpu_index >= 0:
-        if gpu_index < torch.cuda.device_count():
-            final_device = f"gpu:{gpu_index}"
-            logging.debug(f"Dispositivo '{requested_device}' validado como '{final_device}'.")
-            return final_device
-        gpu_index -= 1
-
-    logging.warning(f"AVISO: Nenhuma GPU disponível. Usando 'cpu'.")
-    return "cpu"
-
 # --- Dataclass para Agrupar Configurações ---
 @dataclass(frozen=True)
 class AppSettings:
@@ -86,13 +31,16 @@ class AppSettings:
     # ... (outros campos permanecem os mesmos) ...
     CONFIG_FILE: Path = field(default_factory=lambda: ROOT_DIR / os.getenv("CONFIG_FILE", "config.json"))
     LOGS_SAVE_DIR: Path = field(default_factory=lambda: ROOT_DIR / os.getenv("LOGS_SAVE_DIR", "log/"))
+    LOGS_SAVE_DAYS: int = field(default_factory=lambda: get_env_int("LOGS_SAVE_DAYS", 30))
     DB_CONNECTION: Path = field(default_factory=lambda: ROOT_DIR / os.getenv("DB_CONNECTION", "db/captures.db"))
     CAPTURES_SAVE_DIR: Path = field(default_factory=lambda: get_env_path(ROOT_DIR, "CAPTURES_SAVE_DIR"))
     SUSPECT_DETECTIONS_SAVE_DIR: Path = field(default_factory=lambda: get_env_path(ROOT_DIR, "SUSPECT_DETECTIONS_SAVE_DIR"))
-    BASE_PLATE_MODEL: Path = field(default_factory=lambda: get_env_path(ROOT_DIR, "BASE_PLATE_MODEL"))
+    PLATE_DETECTION_MODEL: Path = field(default_factory=lambda: get_env_path(ROOT_DIR, "PLATE_DETECTION_MODEL"))
     OCR_CHAR_DICT_FILE: Path = field(default_factory=lambda: get_env_path(ROOT_DIR, "OCR_CHAR_DICT_FILE"))
     CHAR_CORRECTIONS_FILE: Path = field(default_factory=lambda: get_env_path(ROOT_DIR, "CHAR_CORRECTIONS_FILE"))
     USE_OCR_DETECTION: bool = field(default_factory=lambda: get_env_bool("USE_OCR_DETECTION"))
+    USE_OCR_HPI: bool = field(default_factory=lambda: get_env_bool("USE_OCR_HPI", True))
+    USE_OCR_TENSORRT: bool = field(default_factory=lambda: get_env_bool("USE_OCR_TENSORRT", True))
     USE_CONTINUOUS_TRIES: bool = field(default_factory=lambda: get_env_bool("USE_CONTINUOUS_TRIES", False))
     SAVE_SUSPECT_DETECTIONS: bool = field(default_factory=lambda: get_env_bool("SAVE_SUSPECT_DETECTIONS"))
     SHOW_CAPTURES: bool = field(default_factory=lambda: get_env_bool("SHOW_CAPTURES"))
@@ -116,7 +64,7 @@ class AppSettings:
     def __post_init__(self):
         """Carrega e valida configurações que dependem de outras ou de arquivos."""
 
-        setup_logger(self.LOGS_SAVE_DIR)
+        setup_logger()
 
         # Carrega dados do config.json
         with open(self.CONFIG_FILE) as f:

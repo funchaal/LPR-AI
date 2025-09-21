@@ -5,7 +5,6 @@ import numpy as np
 import re
 import uuid
 import time
-from pathlib import Path
 
 # Módulos da aplicação
 from modules.detector import load_yolo
@@ -18,8 +17,7 @@ from modules.db_manager import CapturesDatabase
 from app_utils.logger import setup_logger
 from modules.ocr import init_ocr
 
-from app_utils.config import _validate_and_normalize_device  # Importa o objeto de configurações já validado
-from app.app_utils.optimize_yolo_model import ensure_best_model
+from app_utils.validate_and_normalize_device import validate_and_normalize_device  # Importa o objeto de configurações já validado
 
 # Importa a instância única de configurações do arquivo config.py
 from app_utils.config import settings
@@ -42,17 +40,17 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
     """
     # Configura o logger para este processo específico
 
-    setup_logger(settings.LOGS_SAVE_DIR)
+    setup_logger()
 
     logging.info(f"[{input_name}] Iniciando processo para instância '{instance_id}'")
 
-    yolo_validated_device = _validate_and_normalize_device(yolo_device)
+    yolo_validated_device = validate_and_normalize_device(yolo_device)
     yolo_inference_device = '0' if yolo_validated_device == 'gpu' else yolo_validated_device.replace('gpu:', '')
 
     # Carrega modelo YOLO (detecção de placas)
-    model = load_yolo(settings.BASE_PLATE_MODEL, yolo_validated_device)
+    model = load_yolo(settings.PLATE_DETECTION_MODEL, yolo_validated_device)
 
-    ocr_validated_device = _validate_and_normalize_device(ocr_device)
+    ocr_validated_device = validate_and_normalize_device(ocr_device)
 
     ocr_common_args = {
         'det_model_dir': str(settings.OCR_DETECTION_MODEL) if settings.OCR_DETECTION_MODEL else None,
@@ -64,7 +62,7 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
 
     ocr = init_ocr(**ocr_common_args)
     
-    setup_logger(settings.LOGS_SAVE_DIR)
+    setup_logger()
 
     # Inicializa captura de vídeo e gerenciador de banco de dados
     video_source = VideoSource(

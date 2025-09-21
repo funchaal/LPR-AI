@@ -1,14 +1,14 @@
 import logging
 import sys
 from logging.handlers import TimedRotatingFileHandler
-from pathlib import Path
 import os
+from app_utils.config import settings
 
 # Um formato de log mais completo que inclui o nome do processo,
 # o que é extremamente útil para depurar aplicações multiprocesso.
 LOG_FORMAT = "%(asctime)s — %(processName)s — %(levelname)s — %(message)s"
 
-def setup_logger(logs_save_dir: Path):
+def setup_logger():
     """
     Configura o logger raiz para ser seguro para múltiplos processos.
 
@@ -16,6 +16,7 @@ def setup_logger(logs_save_dir: Path):
     para garantir que todos configurem o logging da mesma forma.
     """
     # Pega o logger raiz. Todos os loggers da aplicação herdarão dele.
+    logs_save_dir = settings.LOGS_SAVE_DIR
     os.makedirs(logs_save_dir, exist_ok=True)
     logger = logging.getLogger()
 
@@ -36,13 +37,13 @@ def setup_logger(logs_save_dir: Path):
 
     # 2. Handler para arquivos, com rotação por tempo
     #    Salva os logs em um arquivo que é rotacionado à meia-noite.
-    #    'backupCount=5' guarda os logs dos últimos 5 dias.
-    log_file_path = logs_save_dir / "plate_recognition.log"
+    #    'backupCount=30' guarda os logs dos últimos 30 dias.
+    log_file_path = logs_save_dir / "system.log"
     file_handler = TimedRotatingFileHandler(
         log_file_path, 
         when='midnight', 
         interval=1, 
-        backupCount=5, 
+        backupCount=settings.LOGS_SAVE_DAYS,  # <- MUDANÇA: era 5, agora é 30
         encoding='utf-8'
     )
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT))

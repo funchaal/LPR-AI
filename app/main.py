@@ -12,7 +12,7 @@ def main():
     Função gerente que cria e gerencia os processos para cada fonte de vídeo.
     """
     # Configura o logger principal (já feito no config.py, mas não custa garantir)
-    setup_logger(settings.LOGS_SAVE_DIR)
+    setup_logger()
     
     try:
         set_start_method('spawn')
