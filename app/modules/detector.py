@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from ultralytics import YOLO
 
-from app.app_utils.optimize_yolo_model import ensure_best_model
+from app_utils.optimize_yolo_model import optimize_yolo_model
 
 def load_yolo(base_model_path: Path, device: str) -> YOLO:
     """
@@ -17,7 +17,7 @@ def load_yolo(base_model_path: Path, device: str) -> YOLO:
         YOLO: Uma instância do modelo YOLO carregado.
     """
 
-    optimized_model_path = ensure_best_model(base_model_path, device)
+    optimized_model_path = optimize_yolo_model(base_model_path, device)
 
     try:
         # O 'task' é inferido automaticamente a partir de modelos .engine

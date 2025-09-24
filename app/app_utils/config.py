@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 import torch
 
-from app_utils.logger import setup_logger
+# from app_utils.logger import setup_logger
 
 # --- Constantes de Caminho ---
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -48,9 +48,16 @@ class AppSettings:
     CROP_MARGIN: int = field(default_factory=lambda: get_env_int("CROP_MARGIN"))
     READING_FORMATS: list[str] = field(default_factory=lambda: os.getenv("READING_FORMATS", "").split(","))
     READINGS_FILTER_REGEX: str | None = field(default_factory=lambda: os.getenv("READINGS_FILTER_REGEX"))
+    MAX_NO_FRAME_COUNT: int = field(default_factory=lambda: get_env_int("MAX_NO_FRAME_COUNT"))
     API_ENDPOINT: str | None = field(default_factory=lambda: os.getenv("API_ENDPOINT"))
     API_USER: str | None = field(default_factory=lambda: os.getenv("API_USER"))
     API_PASSWORD: str | None = field(default_factory=lambda: os.getenv("API_PASSWORD"))
+
+    PLATE_DETECTION_DEVICE: str | None = field(default_factory=lambda: os.getenv("PLATE_DETECTION_DEVICE"))
+    OCR_DEVICE: str | None = field(default_factory=lambda: os.getenv("OCR_DEVICE"))
+
+    STABILITY_MAX_COORDINATE_DIFFERENCE: int = field(default_factory=lambda: get_env_int("STABILITY_MAX_COORDINATE_DIFFERENCE"))
+    STATIONARY_FRAME_THRESHOLD: int = field(default_factory=lambda: get_env_int("STATIONARY_FRAME_THRESHOLD"))
 
     # Carregados de arquivos ou determinados dinamicamente
     INPUT_SOURCES: dict = field(init=False)
@@ -64,7 +71,7 @@ class AppSettings:
     def __post_init__(self):
         """Carrega e valida configurações que dependem de outras ou de arquivos."""
 
-        setup_logger()
+        # setup_logger()
 
         # Carrega dados do config.json
         with open(self.CONFIG_FILE) as f:
@@ -73,8 +80,8 @@ class AppSettings:
         # 2. Processa e valida cada fonte de entrada
         validated_sources = {}
         sources_from_config = config_data.get("input_sources", {})
-        if not sources_from_config:
-            logging.error("Nenhuma 'input_sources' encontrada no config.json!")
+        # if not sources_from_config:
+            # logging.error("Nenhuma 'input_sources' encontrada no config.json!")
         
         for name, data in sources_from_config.items():
             

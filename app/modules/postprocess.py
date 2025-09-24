@@ -12,6 +12,51 @@ def post_process_plate(plate_frame):
 
     return adjusted
 
+def is_detection_stationary(tracker_state: dict, new_bbox: tuple, max_diff: int, stationary_frame_threshold: int) -> bool:
+    """
+    Verifica se uma detecção está estacionária usando um dicionário de estado independente.
+
+    Args:
+        tracker_state (dict): Dicionário para armazenar o estado. 
+                              Deve conter 'last_bbox' e 'stability_count'.
+        new_bbox (tuple): A nova bounding box no formato (x1, y1, x2, y2).
+        max_diff (int): A máxima variação em pixels para uma coordenada ser considerada estável.
+        stationary_frame_threshold (int): Limiar de frames para considerar a placa estacionária.
+
+    Returns:
+        bool: True se a detecção for estacionária e deva ser ignorada.
+              False se a detecção for nova ou tiver se movido.
+    """
+    last_bbox = tracker_state.get('last_bbox')
+
+    if last_bbox is None:
+        tracker_state['stability_count'] = 1
+    else:
+        last_x1, last_y1, last_x2, last_y2 = last_bbox
+        x1, y1, x2, y2 = new_bbox
+        
+        diff_x1 = abs(x1 - last_x1)
+        diff_y1 = abs(y1 - last_y1)
+        diff_x2 = abs(x2 - last_x2)
+        diff_y2 = abs(y2 - last_y2)
+
+        # Se a placa se moveu (NÃO atende à condição de estabilidade)
+        if not (diff_x1 < max_diff or diff_y1 < max_diff or
+                diff_x2 < max_diff or diff_y2 < max_diff):
+            tracker_state['stability_count'] = 1 # Resetou
+        else:
+            # Continua estável, incrementa
+            tracker_state['stability_count'] += 1
+            
+    # Atualiza o estado com a posição atual
+    tracker_state['last_bbox'] = new_bbox
+
+    # Retorna True se a contagem ultrapassou o limiar
+    if tracker_state.get('stability_count', 0) > stationary_frame_threshold:
+        return True
+
+    return False
+
 def choose_best_ocr_prediction(predictions):
     plate_text = ''
     score = 0
@@ -248,7 +293,7 @@ def chooseBestFrame(frames_data: list, comparison_text: str = None) -> dict | No
                 height, width = frame['input_frame'].shape[:2]
                 image_center_x, image_center_y = width / 2, height / 2
 
-                x1, y1, x2, y2 = frame['plate_bounding_box']
+                x1, y1, x2, y2 = frame['bounding_box']
                 bbox_center_x, bbox_center_y = (x1 + x2) / 2, (y1 + y2) / 2
                 
                 distance = ((bbox_center_x - image_center_x) ** 2 + (bbox_center_y - image_center_y) ** 2) ** 0.5

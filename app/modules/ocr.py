@@ -4,6 +4,7 @@ import logging
 import os
 from app_utils.optimize_ocr_model import optimize_ocr_model
 from app_utils.config import settings
+from app_utils.logger import setup_logger
 
 
 def init_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict_file=None, **kwargs):
@@ -26,6 +27,7 @@ def init_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict
     """
     
     # Otimiza modelos baseado no dispositivo
+    setup_logger()
     if device == 'cpu':
         try:
             # Tenta otimizar os modelos para OpenVINO

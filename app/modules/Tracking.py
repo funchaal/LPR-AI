@@ -221,50 +221,76 @@ class Tracking:
                 return
             self.closed = True
 
+        is_suspect = False
+
         # Se a API não definiu finalReading, usa a melhor local
         if not self.finalReading and self.readings:
             if not self.possibleReadings:
-                self.possibleReadings = self.__class__.reading_filter_by_regex.filter_list(definePossibleReadings(self.readings))
-            
+                if self.__class__.format_converter is not None:
+                    # Obtém as leituras originais
+                    original_readings = list(self.readings.keys())
+                    
+                    # Converte as leituras usando o format_converter da classe
+                    converted_readings_dict = self.__class__.format_converter.convert(original_readings)
+                    
+                    # Cria uma cópia das leituras atuais para atualizar
+                    updated_readings = self.readings.copy()
+                    
+                    # Atualiza as leituras convertidas somando os scores
+                    for original_plate, converted_readings in converted_readings_dict.items():
+                        original_score = self.readings.get(original_plate, 0)
+                        for converted_plate in converted_readings:
+                            updated_readings[converted_plate] = updated_readings.get(converted_plate, 0) + original_score
+
+                    self.readings = updated_readings
+
+                # Define as leituras possíveis
+                defined_possible_readings = definePossibleReadings(self.readings)
+                defined_possible_readings = self.__class__.reading_filter_by_regex.filter_list(defined_possible_readings)
+
+                # Atualiza possibleReadings filtrando novamente (pode ser opcional)
+                self.possibleReadings = defined_possible_readings
+
             if self.possibleReadings:
                 self.finalReading = self.possibleReadings[0]
-            else :
+            else:
                 self.finalReading = '...'
+                is_suspect = True
 
-        duration = datetime.now() - self.start_time
-        logging.info(f"Finalizando passagem {self.id} (duração: {duration.total_seconds():.2f}s)")
+        if not is_suspect:
+            duration = datetime.now() - self.start_time
+            logging.info(f"Finalizando passagem {self.id} (duração: {duration.total_seconds():.2f}s)")
 
+            logging.info(f"Leituras realizadas para {self.id}: {dict(self.readings)}")
+            logging.info(f"Leituras possíveis para {self.id}: {self.possibleReadings}")
+            logging.info(f"Leitura final para {self.id}: {self.finalReading}")
+            
+            # Salva a imagem
+            image_path = self._save_capture_image()
+            
+            # Prepara dados para salvar no banco
+            tracking_data = {
+                'id': self.id,
+                'instance_id': self.__class__.instance_id,
+                'finalReading': self.finalReading,
+                'image_path': image_path,
+                'readings': dict(self.readings),
+                'possibleReadings': self.possibleReadings,
+            }
+            
+            # Salva no banco de dados
+            if self.__class__.db_manager:
+                try:
+                    self.__class__.db_manager.save_tracking(tracking_data)
+                    logging.info(f"Dados salvos no banco para {self.id}")
+                except Exception as e:
+                    logging.error(f"Erro ao salvar no banco para {self.id}: {e}")
 
-        logging.info(f"Leituras realizadas para {self.id}: {dict(self.readings)}")
-        logging.info(f"Leituras possíveis para {self.id}: {self.possibleReadings}")
-        logging.info(f"Leitura final para {self.id}: {self.finalReading}")
-        
-        # Salva a imagem
-        image_path = self._save_capture_image()
-        
-        # Prepara dados para salvar no banco
-        tracking_data = {
-            'id': self.id,
-            'instance_id': self.__class__.instance_id,
-            'finalReading': self.finalReading,
-            'image_path': image_path,
-            'readings': dict(self.readings),
-            'possibleReadings': self.possibleReadings,
-        }
-        
-        # Salva no banco de dados
-        if self.__class__.db_manager:
-            try:
-                self.__class__.db_manager.save_tracking(tracking_data)
-                logging.info(f"Dados salvos no banco para {self.id}")
-            except Exception as e:
-                logging.error(f"Erro ao salvar no banco para {self.id}: {e}")
-
-        # Salva detecções suspeitas
-        self.__class__.save_suspect_detections()
+        else:
+            self._save_capture_image()
         
         # Remove da memória
-        if self.leftTheFrame:
+        if not is_suspect or self.leftTheFrame:
             logging.info(f"Passagem {self.id} completamente finalizada e removida da memória.")
             self._cleanup_tracking()
 
@@ -293,7 +319,7 @@ class Tracking:
             folder_path = self.__class__.captures_save_path / str(now.year) / f"{now.month:02d}" / f"{now.day:02d}"
             folder_path.mkdir(parents=True, exist_ok=True)
             
-            x1, y1, x2, y2 = best_frame['plate_bounding_box']
+            x1, y1, x2, y2 = best_frame['bounding_box']
             input_name = best_frame['input_name']
             
             # Garante que a placa final não seja vazia no nome do arquivo
@@ -315,7 +341,7 @@ class Tracking:
     @classmethod
     def setup(cls, db_manager, instance_id: str, captures_save_path: str, 
               suspect_detections_save_path: str, use_continuous_tries: bool = False, 
-              reading_formats: list = None, readings_filter_regex: str = None, char_corrections: dict = None,
+              reading_formats: list = None, readings_filter_regex: str = None, char_corrections: dict = None, max_no_frame_count: int = 10, 
               api_endpoint: str = None, api_user: str = None, api_password: str = None):
         """Configura o módulo de Tracking com os parâmetros necessários."""
         cls.db_manager = db_manager
@@ -326,6 +352,8 @@ class Tracking:
 
         cls.reading_filter_by_regex = RegexValidator(readings_filter_regex)
         cls.format_converter = FormatConverter(reading_formats, char_corrections or {}) if reading_formats else None
+
+        cls.max_no_frame_count = max_no_frame_count
         
         cls.api_endpoint = api_endpoint
         cls.api_user = api_user
@@ -351,8 +379,9 @@ class Tracking:
         # Trabalha com trackings ativos
         for track in list(cls.trackings.values()):
             track.noFrameCount += 1
+            logging.info(f'NoFrameCount atualmente para a passagem {track.id}: {track.noFrameCount}')
 
-            if track.noFrameCount > 10:
+            if track.noFrameCount > cls.max_no_frame_count:
                 track.leftTheFrame = True
                 logging.info(f"Passagem {track.id} excedeu limite de frames (timeout)")
                 
@@ -361,29 +390,3 @@ class Tracking:
                     track._start_async_close()
                 elif track.api_calls == 0:
                     track._cleanup_tracking()
-
-    @classmethod
-    def save_suspect_detections(cls):
-        """Salva detecções suspeitas em disco."""
-        if not cls.suspect_detections: 
-            return
-        if not cls.suspect_detections_save_path:
-            logging.warning("Caminho para detecções suspeitas não configurado.")
-            cls.suspect_detections = []
-            return
-        
-        logging.info(f"Salvando {len(cls.suspect_detections)} detecções suspeitas.")
-        for detection in cls.suspect_detections:
-            try:
-                frame_id = detection["frame_id"]
-                frame = detection["frame"]
-                x1, y1, x2, y2 = detection["coords"]
-                tipo = detection["type"]
-                input_name = detection["input_name"]
-                filename = f"{input_name} {x1}-{y1}-{x2}-{y2} {tipo} {frame_id}.jpg"
-                filepath = cls.suspect_detections_save_path / filename
-                cv2.imwrite(str(filepath), frame)
-            except (KeyError, cv2.error, Exception) as e:
-                logging.error(f"Erro ao salvar detecção suspeita: {e}")
-                continue
-        cls.suspect_detections = []

@@ -3,21 +3,15 @@ import cv2
 import logging
 import numpy as np
 import re
-import uuid
 import time
 
-# Módulos da aplicação
-from modules.detector import load_yolo
-from modules.postprocess import post_process_plate, choose_best_ocr_prediction, crop_margin
+from modules.postprocess import post_process_plate, choose_best_ocr_prediction, crop_margin, is_detection_stationary
 from modules.preprocess import draw_polygonal_mask
 from modules.capture import VideoSource
-from modules.validate import validate_bounding_box, validate_text
 from modules.Tracking import Tracking
 from modules.db_manager import CapturesDatabase
 from app_utils.logger import setup_logger
-from modules.ocr import init_ocr
-
-from app_utils.validate_and_normalize_device import validate_and_normalize_device  # Importa o objeto de configurações já validado
+# from modules.validate import validate_bounding_box, validate_text
 
 # Importa a instância única de configurações do arquivo config.py
 from app_utils.config import settings
@@ -25,7 +19,7 @@ from app_utils.config import settings
 # Garante a compatibilidade com certas bibliotecas de deep learning em alguns ambientes
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-def process_source(instance_id: str, input_name: str, input_endpoint: str, input_user: str = None, input_password: str = None, polygons: list = None, yolo_device: str = 'cpu', ocr_device: str = 'cpu'):
+def process_source(instance_id: str, input_name: str, input_endpoint: str, input_user: str, input_password: str, polygons: list, yolo, ocr ,yolo_inference_device):
     """
     Processa uma única fonte de vídeo, desde a captura até a análise e salvamento.
     Esta função contém o loop principal de processamento de frames.
@@ -44,31 +38,11 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
 
     logging.info(f"[{input_name}] Iniciando processo para instância '{instance_id}'")
 
-    yolo_validated_device = validate_and_normalize_device(yolo_device)
-    yolo_inference_device = '0' if yolo_validated_device == 'gpu' else yolo_validated_device.replace('gpu:', '')
-
-    # Carrega modelo YOLO (detecção de placas)
-    model = load_yolo(settings.PLATE_DETECTION_MODEL, yolo_validated_device)
-
-    ocr_validated_device = validate_and_normalize_device(ocr_device)
-
-    ocr_common_args = {
-        'det_model_dir': str(settings.OCR_DETECTION_MODEL) if settings.OCR_DETECTION_MODEL else None,
-        'rec_model_dir': str(settings.OCR_RECOGNITION_MODEL) if settings.OCR_RECOGNITION_MODEL else None,
-        'use_det': settings.USE_OCR_DETECTION,
-        'device': ocr_validated_device, 
-        'char_dict_file': settings.OCR_CHAR_DICT_FILE
-    }
-
-    ocr = init_ocr(**ocr_common_args)
-    
-    setup_logger()
-
     # Inicializa captura de vídeo e gerenciador de banco de dados
     video_source = VideoSource(
         input_endpoint, 
         username=input_user,     # opcional, se existir
-        password=input_password  # opcional, se existir
+        password=input_password  #c opcional, se existir
     )
 
     db_manager = CapturesDatabase(db_path=settings.DB_CONNECTION)
@@ -78,9 +52,10 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
         db_manager=db_manager,
         instance_id=instance_id,
         captures_save_path=settings.CAPTURES_SAVE_DIR,
-        reading_formats=settings.READING_FORMATS, 
+        reading_formats=settings.READING_FORMATS,
         char_corrections=settings.CHAR_CORRECTIONS,
         readings_filter_regex=settings.READINGS_FILTER_REGEX,
+        max_no_frame_count=settings.MAX_NO_FRAME_COUNT,
         api_endpoint=settings.API_ENDPOINT,
         api_user=settings.API_USER,
         api_password=settings.API_PASSWORD,
@@ -92,25 +67,30 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
     current_track = None
     logging.info(f"[{input_name}] Iniciando loop de captura de vídeo para a fonte: {input_endpoint}")
     
-    if settings.SHOW_CAPTURES and settings.CALCULATE_FPS:
+    if settings.CALCULATE_FPS:
         fps_start_time = time.time()
         fps_frame_count = 0
         fps = 0.0
 
+    count_loop_fps = 0
+
+    stationary_plate_tracker = {
+        'last_bbox': None,
+        'stability_count': 0
+    }
+
     # --- Loop Principal de Processamento ---
     while True:
         frame = video_source.get_frame()
+
         if frame is None:
-            if video_source.source_type in ("stream", "camera"):
-                logging.warning(f"[{input_name}] Tentando reconectar...")
-                video_source = VideoSource(
-                    input_endpoint, 
-                    username=settings.STREAM_USER, 
-                    password=settings.STREAM_PASSWORD
-                )
+            # CORREÇÃO: Usar os tipos definidos na classe ('rtsp', 'http', 'camera')
+            if video_source.source_type in ("rtsp", "http", "camera"):
+                logging.warning(f"[{input_name}] Frame nulo, aguardando 2s para tentar reconectar...")
+                time.sleep(2)  # Evita um loop de reconexão muito rápido
                 continue
-            else:
-                logging.info(f"[{input_name}] Fim do vídeo ou erro ao obter frame. Encerrando.")
+            else: # Para o tipo 'video', significa que o arquivo acabou
+                logging.info(f"[{input_name}] Fim do vídeo ou erro fatal. Encerrando.")
                 break
 
         processed_frame = draw_polygonal_mask(frame, polygons)
@@ -118,25 +98,24 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
         # Chama newFrame para gerenciar timeouts dos trackings
         Tracking.newFrame()
 
-        results = model.predict(processed_frame, device=yolo_inference_device, verbose=False)
-        frame_id = None
+        results = yolo.predict(processed_frame, device=yolo_inference_device, verbose=False)
         
         if results and results[0].boxes:
             objects = results[0].boxes.data.tolist()
+
+            logging.debug(f"{len(objects)} placa(s) detectada(s) neste frame.")
             
             for x1, y1, x2, y2, prob, cls in objects:
                 x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
-                
-                # Salva detecções suspeitas (bounding box inválido)
-                if settings.SAVE_SUSPECT_DETECTIONS and not validate_bounding_box(x1, y1, x2, y2):
-                    frame_id = str(uuid.uuid4())
-                    Tracking.suspect_detections.append({
-                        "frame_id": frame_id, 
-                        "frame": frame, 
-                        "coords": [x1, y1, x2, y2],
-                        "type": 1, 
-                        'input_name': input_name
-                    })
+
+                if is_detection_stationary(
+                    tracker_state=stationary_plate_tracker,
+                    new_bbox=(x1, y1, x2, y2),
+                    max_diff=settings.STABILITY_MAX_COORDINATE_DIFFERENCE,
+                    stationary_frame_threshold=settings.STATIONARY_FRAME_THRESHOLD 
+                ):
+                    logging.debug(f"[{input_name}] Placa estacionária detectada pelo tracker independente. Ignorando.")
+                    continue
 
                 if current_track and Tracking.trackings.get(current_track.id) is not None and Tracking.trackings.get(current_track.id).closing and Tracking.trackings.get(current_track.id).api_calls > 0:
                     current_track = Tracking()
@@ -144,6 +123,7 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
 
                 if current_track and Tracking.trackings.get(current_track.id) is not None and Tracking.trackings.get(current_track.id).closing:
                     Tracking.trackings.get(current_track.id).noFrameCount = 0
+                    logging.debug('NoFrameCount zerado.')
                     continue
 
                 # Extrai e processa a região da placa
@@ -171,18 +151,8 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
                 if not plate_text:
                     logging.debug("Predição OCR vazia.")
                     continue
-               
-                # Salva detecções suspeitas (texto inválido)
-                if settings.SAVE_SUSPECT_DETECTIONS and not validate_text(plate_text):
-                    if not frame_id:
-                        frame_id = str(uuid.uuid4())
-                    Tracking.suspect_detections.append({
-                        "frame_id": frame_id, 
-                        "frame": frame, 
-                        "coords": [x1, y1, x2, y2],
-                        "type": 2, 
-                        'input_name': input_name
-                    })
+
+                logging.debug(f"OCR lido: {plate_text}")
 
                 if not current_track or not Tracking.trackings or Tracking.trackings.get(current_track.id) is None:
                     current_track = Tracking()
@@ -190,7 +160,7 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
 
                 capture_data = {
                     'input_frame': frame, 
-                    'plate_bounding_box': [x1, y1, x2, y2], 
+                    'bounding_box': [x1, y1, x2, y2], 
                     'input_name': input_name, 
                     'reading': plate_text
                 }
@@ -200,14 +170,19 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
             logging.debug("Nenhuma placa detectada neste frame.")
 
         # Interface de visualização (se habilitada)
-        if settings.SHOW_CAPTURES:
-            if settings.CALCULATE_FPS:
-                fps_frame_count += 1
-                if (time.time() - fps_start_time) > 1.0:
-                    fps = fps_frame_count / (time.time() - fps_start_time)
-                    fps_start_time = time.time()
-                    fps_frame_count = 0
+        if settings.CALCULATE_FPS:
+            fps_frame_count += 1
+            if (time.time() - fps_start_time) > 1.0:
+                fps = fps_frame_count / (time.time() - fps_start_time)
+                fps_start_time = time.time()
+                fps_frame_count = 0
+            if count_loop_fps == 20:
+                 count_loop_fps = 0
+                 logging.info(f"FPS: {fps}")
+            else:
+                count_loop_fps += 1
 
+        if settings.SHOW_CAPTURES:
             display_frame = frame.copy()
 
             # Desenha polígonos de máscara

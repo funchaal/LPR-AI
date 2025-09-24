@@ -66,7 +66,7 @@ def optimize_ocr_model(model_dir, device='cpu', output_base_dir="app/models/ocr"
         model_name = os.path.basename(model_dir)
         
         # Verifica se já existe versão OpenVINO otimizada
-        openvino_path = os.path.join(output_base_dir, "openvino", model_name, f"{model_name}.xml")
+        openvino_path = os.path.join(model_dir.replace('paddlepaddle', 'openvino'), f"{model_name}.xml")
         
         if os.path.exists(openvino_path):
             try:
@@ -89,7 +89,7 @@ def optimize_ocr_model(model_dir, device='cpu', output_base_dir="app/models/ocr"
                 return model_dir
         else:
             # Modelo OpenVINO não existe, usa o modelo base
-            logging.info(f"Modelo OpenVINO não encontrado para {model_name}, usando modelo base: {model_dir}")
+            logging.info(f"Modelo OpenVINO não encontrado para {model_name} ({openvino_path}), usando modelo base: {model_dir}")
             return model_dir
             
     except Exception as e:
