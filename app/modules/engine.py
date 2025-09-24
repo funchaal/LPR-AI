@@ -60,6 +60,7 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
         api_user=settings.API_USER,
         api_password=settings.API_PASSWORD,
         use_continuous_tries=settings.USE_CONTINUOUS_TRIES,
+        save_suspect_detections=settings.SAVE_SUSPECT_DETECTIONS,
         suspect_detections_save_path=settings.SUSPECT_DETECTIONS_SAVE_DIR,
     )
     

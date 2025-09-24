@@ -301,7 +301,7 @@ class Tracking:
         logging.info(f"Removendo passagem {self.id} da memória.")
         self.__class__.trackings.pop(self.id, None)
 
-    def _save_capture_image(self) -> str | None:
+    def _save_capture_image(self, is_suspect=False) -> str | None:
         """
         Escolhe o melhor frame e salva a imagem.
         """
@@ -316,7 +316,14 @@ class Tracking:
                 return None
 
             now = datetime.now()
-            folder_path = self.__class__.captures_save_path / str(now.year) / f"{now.month:02d}" / f"{now.day:02d}"
+            base_folder_path = None
+
+            if is_suspect and self.__class__.save_suspect_detections and self.__class__.suspect_detections_save_path:
+                base_folder_path = self.__class__.suspect_detections_save_path
+            else:
+                base_folder_path = self.__class__.captures_save_path
+
+            folder_path = base_folder_path / str(now.year) / f"{now.month:02d}" / f"{now.day:02d}"
             folder_path.mkdir(parents=True, exist_ok=True)
             
             x1, y1, x2, y2 = best_frame['bounding_box']
@@ -339,7 +346,7 @@ class Tracking:
     # --- Métodos de Classe ---
     
     @classmethod
-    def setup(cls, db_manager, instance_id: str, captures_save_path: str, 
+    def setup(cls, db_manager, instance_id: str, captures_save_path: str, save_suspect_detections: bool,
               suspect_detections_save_path: str, use_continuous_tries: bool = False, 
               reading_formats: list = None, readings_filter_regex: str = None, char_corrections: dict = None, max_no_frame_count: int = 10, 
               api_endpoint: str = None, api_user: str = None, api_password: str = None):
@@ -347,6 +354,7 @@ class Tracking:
         cls.db_manager = db_manager
         cls.instance_id = instance_id
         cls.captures_save_path = Path(captures_save_path) if captures_save_path else None
+        cls.save_suspect_detections = save_suspect_detections
         cls.suspect_detections_save_path = Path(suspect_detections_save_path) if suspect_detections_save_path else None
         cls.use_continuous_tries = use_continuous_tries
 
