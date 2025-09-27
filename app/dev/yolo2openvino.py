@@ -3,8 +3,7 @@ import shutil
 from pathlib import Path
 from ultralytics import YOLO
 
-# Ponto 3: Usando import relativo para robustez, buscando o config.py no diretório pai (app/)
-from app_utils.config import settings, APP_DIR
+APP_DIR = Path(__file__).resolve().parent.parent
 
 def yolo2openvino(yolo_model_path, output_base_dir=None):
     """
@@ -93,3 +92,8 @@ def yolo2openvino(yolo_model_path, output_base_dir=None):
     except Exception as e:
         logging.error(f"Erro na conversão YOLO->OpenVINO para {yolo_model_path.name}: {e}")
         return None
+    
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    test_model_path = APP_DIR / 'models' / 'plate' / 'pytorch' / 'best.pt'
+    yolo2openvino(test_model_path)

@@ -46,6 +46,8 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
     )
 
     db_manager = CapturesDatabase(db_path=settings.DB_CONNECTION)
+
+    print('MAX NO FRAME COUNT:', settings.MAX_NO_FRAME_COUNT)
     
     # Configura o módulo de Tracking com os parâmetros carregados
     Tracking.setup(
@@ -75,6 +77,8 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
 
     count_loop_fps = 0
 
+    is_stationary = False
+
     stationary_plate_tracker = {
         'last_bbox': None,
         'stability_count': 0
@@ -97,7 +101,8 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
         processed_frame = draw_polygonal_mask(frame, polygons)
         
         # Chama newFrame para gerenciar timeouts dos trackings
-        Tracking.newFrame()
+        if not is_stationary:
+            Tracking.newFrame()
 
         results = yolo.predict(processed_frame, device=yolo_inference_device, verbose=False)
         
@@ -109,14 +114,19 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
             for x1, y1, x2, y2, prob, cls in objects:
                 x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
 
+                logging.debug(f'Sequencia de leituras estacionárias: {stationary_plate_tracker["stability_count"]}')
+
                 if is_detection_stationary(
                     tracker_state=stationary_plate_tracker,
                     new_bbox=(x1, y1, x2, y2),
                     max_diff=settings.STABILITY_MAX_COORDINATE_DIFFERENCE,
                     stationary_frame_threshold=settings.STATIONARY_FRAME_THRESHOLD 
                 ):
+                    is_stationary = True
                     logging.debug(f"[{input_name}] Placa estacionária detectada pelo tracker independente. Ignorando.")
                     continue
+
+                is_stationary = False
 
                 if current_track and Tracking.trackings.get(current_track.id) is not None and Tracking.trackings.get(current_track.id).closing and Tracking.trackings.get(current_track.id).api_calls > 0:
                     current_track = Tracking()
@@ -168,6 +178,7 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
 
                 current_track.addCapture(capture_data)
         else:
+            is_stationary = False
             logging.debug("Nenhuma placa detectada neste frame.")
 
         # Interface de visualização (se habilitada)

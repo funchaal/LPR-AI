@@ -16,13 +16,17 @@ def setup_logger():
     para garantir que todos configurem o logging da mesma forma.
     """
     # Pega o logger raiz. Todos os loggers da aplicação herdarão dele.
+
     logs_save_dir = settings.LOGS_SAVE_DIR
     os.makedirs(logs_save_dir, exist_ok=True)
     logger = logging.getLogger()
 
     # Define o nível mínimo de log que será processado.
     # Use logging.DEBUG para ver mensagens mais detalhadas.
-    logger.setLevel(logging.INFO)
+    if settings.DEBUG:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
 
     # Limpa quaisquer handlers que possam ter sido herdados do processo pai.
     # Isso é crucial para evitar duplicação de logs ou conflitos.

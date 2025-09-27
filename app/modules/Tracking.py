@@ -290,7 +290,7 @@ class Tracking:
             self._save_capture_image()
         
         # Remove da memória
-        if not is_suspect or self.leftTheFrame:
+        if is_suspect or self.leftTheFrame:
             logging.info(f"Passagem {self.id} completamente finalizada e removida da memória.")
             self._cleanup_tracking()
 

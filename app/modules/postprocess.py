@@ -41,8 +41,8 @@ def is_detection_stationary(tracker_state: dict, new_bbox: tuple, max_diff: int,
         diff_y2 = abs(y2 - last_y2)
 
         # Se a placa se moveu (NÃO atende à condição de estabilidade)
-        if not (diff_x1 < max_diff or diff_y1 < max_diff or
-                diff_x2 < max_diff or diff_y2 < max_diff):
+        if not ((diff_x1 < max_diff and diff_y1 < max_diff) or
+                (diff_x2 < max_diff and diff_y2 < max_diff)):
             tracker_state['stability_count'] = 1 # Resetou
         else:
             # Continua estável, incrementa
