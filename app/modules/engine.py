@@ -46,8 +46,6 @@ def process_source(instance_id: str, input_name: str, input_endpoint: str, input
     )
 
     db_manager = CapturesDatabase(db_path=settings.DB_CONNECTION)
-
-    print('MAX NO FRAME COUNT:', settings.MAX_NO_FRAME_COUNT)
     
     # Configura o módulo de Tracking com os parâmetros carregados
     Tracking.setup(

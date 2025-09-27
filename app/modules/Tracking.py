@@ -387,7 +387,7 @@ class Tracking:
         # Trabalha com trackings ativos
         for track in list(cls.trackings.values()):
             track.noFrameCount += 1
-            logging.info(f'NoFrameCount atualmente para a passagem {track.id}: {track.noFrameCount}')
+            logging.debug(f'NoFrameCount atualmente para a passagem {track.id}: {track.noFrameCount}')
 
             if track.noFrameCount > cls.max_no_frame_count:
                 track.leftTheFrame = True
