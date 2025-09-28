@@ -9,6 +9,7 @@ import cv2
 import requests 
 import threading
 import time
+import json
 
 from itertools import product
 from typing import Dict, List
@@ -94,30 +95,50 @@ class Tracking:
                 return
     
             if response.status_code == 200:
-                if self.api_returned_200:
-                    logging.info(f"API já retornou 200 anteriormente para captura {self.id}. Ignorando resposta duplicada.")
-                    return
-                self.api_returned_200 = True
-                self.api_calls = 0
+                try:
+                    # 1. Decodifica a resposta JSON
+                    data = response.json()
+                    api_status = data.get('status')
+                    content = data.get('content')
 
-                correct_reading = response.text.strip()
-                logging.info(f"API retornou 200 para captura {self.id}. Leitura correta: {correct_reading}")
-                
-                with track_instance._lock:
-                    track_instance.finalReading = correct_reading
+                    # 2. Verifica o status DENTRO do JSON
+                    if api_status == 200:
+                        if self.api_returned_200:
+                            logging.info(f"API já retornou 200 anteriormente para captura {self.id}. Ignorando resposta duplicada.")
+                            return
+                        
+                        self.api_returned_200 = True
+                        self.api_calls = 0
 
-                    if self.__class__.use_continuous_tries and not track_instance.closing:
-                        track_instance._start_async_close()
+                        # O conteúdo da leitura correta agora vem do JSON
+                        correct_reading = content
+                        logging.info(f"API (status interno 200) retornou sucesso para captura {self.id}. Leitura correta: {correct_reading}")
+                        
+                        with track_instance._lock:
+                            track_instance.finalReading = correct_reading
+                            if self.__class__.use_continuous_tries and not track_instance.closing:
+                                track_instance._start_async_close()
 
-            elif response.status_code == 204:
-                if self.api_returned_200:
-                    logging.info(f"API já retornou 200 anteriormente para captura {self.id}. Ignorando resposta duplicada.")
-                    return
-                self.api_calls -= 1 
-                logging.info(f"API retornou 204 para captura {self.id}. Nenhuma leitura correspondeu. Continuando...")
-            
+                    # 3. Lógica para quando o JSON informa "não encontrado"
+                    elif api_status == 204:
+                        if self.api_returned_200:
+                            logging.info(f"API já retornou 200 anteriormente para captura {self.id}. Ignorando resposta duplicada.")
+                            return
+                        
+                        self.api_calls -= 1 
+                        logging.info(f"API (status interno 204) retornou para captura {self.id}. Nenhuma leitura correspondeu. Continuando...")
+                    
+                    else:
+                        # Caso o JSON venha com um status inesperado
+                        logging.warning(f"Status interno da API inesperado ({api_status}) para captura {self.id}. Resposta: {content}")
+
+                except json.JSONDecodeError:
+                    # Tratamento de erro caso a resposta não seja um JSON válido
+                    logging.error(f"Falha ao decodificar JSON da API para captura {self.id}. Resposta recebida: {response.text}")
+
+            # Este 'else' agora trata erros de comunicação com a API (ex: 500, 404, 403, etc.)
             else:
-                logging.error(f"Erro na API para captura {self.id}. Status: {response.status_code}, Resposta: {response.text}")
+                logging.error(f"Erro de comunicação com a API para captura {self.id}. Status HTTP: {response.status_code}, Resposta: {response.text}")
 
         except requests.exceptions.RequestException as e:
             logging.error(f"Falha ao chamar a API para captura {self.id}: {e}")
@@ -201,6 +222,27 @@ class Tracking:
 
                 if self.api_calls > 0:
                     logging.warning(f"Timeout aguardando API para {self.id}. Prosseguindo com fechamento.")
+
+            if self.__class__.close_api_endpoint:
+                try:
+                    close_payload = {
+                        "instance": self.__class__.instance_id,
+                        "capture_id": self.id,
+                        "final_reading": self.finalReading
+                    }
+
+                    logging.info(f"Enviando dados de fechamento para Close API e aguardando retorno (máximo 30s) para captura {self.id}.")
+
+                    close_response = requests.post(self.__class__.close_api_endpoint, json=close_payload, timeout=30, auth=self.__class__.auth)
+
+                    if close_response.status_code == 200:
+                        logging.info(f"Close API retornou 200 para captura {self.id}.")
+                    else:
+                        logging.error(f"Erro na Close API para captura {self.id}. Status: {close_response.status_code}, Resposta: {close_response.text}")
+
+                except requests.exceptions.RequestException as e:
+                    logging.error(f"Falha ao chamar a Close API para captura {self.id}: {e}")
+
 
             # Executa o fechamento final
             self._execute_final_close()
@@ -349,7 +391,7 @@ class Tracking:
     def setup(cls, db_manager, instance_id: str, captures_save_path: str, save_suspect_detections: bool,
               suspect_detections_save_path: str, use_continuous_tries: bool = False, 
               reading_formats: list = None, readings_filter_regex: str = None, char_corrections: dict = None, max_no_frame_count: int = 10, 
-              api_endpoint: str = None, api_user: str = None, api_password: str = None):
+              api_endpoint: str = None, api_user: str = None, api_password: str = None, close_api_endpoint: str = None):
         """Configura o módulo de Tracking com os parâmetros necessários."""
         cls.db_manager = db_manager
         cls.instance_id = instance_id
@@ -366,6 +408,7 @@ class Tracking:
         cls.api_endpoint = api_endpoint
         cls.api_user = api_user
         cls.api_password = api_password
+        cls.close_api_endpoint = close_api_endpoint
 
         # Se usuário e senha forem fornecidos, cria o auth
         cls.auth = (api_user, api_password) if api_user and api_password else None

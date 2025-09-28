@@ -53,6 +53,7 @@ class AppSettings:
     API_ENDPOINT: str | None = field(default_factory=lambda: os.getenv("API_ENDPOINT"))
     API_USER: str | None = field(default_factory=lambda: os.getenv("API_USER"))
     API_PASSWORD: str | None = field(default_factory=lambda: os.getenv("API_PASSWORD"))
+    CLOSE_API_ENDPOINT: str | None = field(default_factory=lambda: os.getenv("CLOSE_API_ENDPOINT"))
 
     PLATE_DETECTION_DEVICE: str | None = field(default_factory=lambda: os.getenv("PLATE_DETECTION_DEVICE"))
     OCR_DEVICE: str | None = field(default_factory=lambda: os.getenv("OCR_DEVICE"))
