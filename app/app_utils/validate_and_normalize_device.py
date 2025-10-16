@@ -21,19 +21,12 @@ def validate_and_normalize_device(requested_device: str) -> str:
 
     # Checa se há suporte a GPU
     is_gpu_available = torch.cuda.is_available()
-    is_paddle_gpu_version = False
-    try:
-        import paddle
-        is_paddle_gpu_version = paddle.is_compiled_with_cuda()
-    except Exception:
-        pass
 
     logging.debug(f"Validando dispositivo GPU '{requested_device}'...")
     logging.debug(f"  - Hardware (NVIDIA): {'SIM' if is_gpu_available else 'NÃO'}")
-    logging.debug(f"  - Software (Paddle GPU): {'SIM' if is_paddle_gpu_version else 'NÃO'}")
 
-    if not (is_gpu_available and is_paddle_gpu_version):
-        logging.warning(f"AVISO: GPU não disponível ou Paddle não compilado com CUDA. Revertendo para 'cpu'.")
+    if not is_gpu_available:
+        logging.warning(f"AVISO: GPU não disponível. Revertendo para 'cpu'.")
         return "cpu"
 
     # Extrai o índice da GPU solicitada

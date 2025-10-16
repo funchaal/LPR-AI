@@ -1,50 +1,57 @@
 @echo off
-REM ===========================
-REM Script baseado no SEU que funciona
-REM Apenas adicionando instalacoes de IA
-REM ===========================
+setlocal
 
-set VENV_DIR=venv
+REM Define o nome do diretório para o ambiente virtual
+set "VENV_DIR=venv"
 
-REM Verifica se a venv existe
+REM Verifica se o Python está disponível
+python --version >nul 2>nul
+if %errorlevel% neq 0 (
+    echo Python nao encontrado. Por favor, instale o Python e adicione-o ao PATH do sistema.
+    pause
+    exit /b 1
+)
+
+REM Se a venv NÃO existir, cria e instala tudo.
 if not exist "%VENV_DIR%\Scripts\activate.bat" (
-    echo Criando virtualenv...
+    echo Criando o ambiente virtual em '%VENV_DIR%'...
     python -m venv %VENV_DIR%
-    
-    REM Ativa a venv recem-criada
+    if %errorlevel% neq 0 (
+        echo Falha ao criar o ambiente virtual.
+        pause
+        exit /b 1
+    )
+
+    echo Ativando o ambiente virtual...
     call "%VENV_DIR%\Scripts\activate.bat"
-    
-    REM Atualiza pip
-    python -m pip install --upgrade pip
-    
-    REM Instala dependencias de IA primeiro
-    echo Instalando PyTorch CPU...
-    pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
-    
-    echo Instalando PaddlePaddle CPU...
-    python -m pip install paddlepaddle==3.0.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-    
-    echo Instalando PaddleOCR...
-    pip install paddleocr==3.2
-    
-    REM Instala dependências apenas na primeira vez
-    if exist requirements.txt (
-        echo Instalando dependencias...
+
+    echo Atualizando o pip...
+    python -m pip install --upgrade pip >nul
+
+    REM Verifica se o arquivo requirements.txt existe antes de instalar
+    if exist "requirements.txt" (
+        echo Instalando dependencias do requirements.txt...
         pip install -r requirements.txt
+    ) else (
+        echo AVISO: Arquivo requirements.txt nao encontrado. Nenhuma dependencia foi instalada.
     )
     
     echo.
-    echo Instalacao concluida! Execute novamente para rodar o programa.
-    pause
-    exit /b 0
-    
+    echo Instalacao concluida! O aplicativo sera iniciado agora.
+    echo.
+
 ) else (
-    REM Ativa a venv já existente
+    REM Se a venv JÁ existir, apenas ativa.
     call "%VENV_DIR%\Scripts\activate.bat"
 )
 
-REM Roda o main.py
+REM Roda o programa principal (executado em ambos os casos)
 echo Rodando o projeto...
-python app\main.py
+if exist "app\main.py" (
+    python app\main.py
+) else (
+    echo ERRO: O arquivo 'app\main.py' nao foi encontrado.
+)
 
 pause
+
