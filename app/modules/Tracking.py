@@ -45,11 +45,13 @@ class Tracking:
     max_no_frame_count = 10
     reading_filter_by_regex = None
     format_converter = None
+    logger = None
 
     # --- Métodos de Instância (para cada passagem individual) ---
 
-    def __init__(self):
+    def __init__(self, logger: logging.Logger):
         """Inicializa uma nova instância de passagem de veículo."""
+        self.logger = logger
         self.id = str(uuid.uuid4())         # ID único para esta passagem.
         self.start_time = datetime.now()   # Momento em que a primeira detecção ocorreu.
         self.readings = defaultdict(int)   # Dicionário para contar a frequência de cada leitura de placa.
@@ -81,62 +83,7 @@ class Tracking:
             if self.__class__.use_continuous_tries:
                 self._update_and_call_api()
 
-    def _call_api_async(self, payload: dict):
-        """Envia os dados para a API externa em uma thread separada para não bloquear."""
-        if self.api_returned_200:
-            return # Se a API já deu sucesso, não envia novamente.
-
-        try:
-            self.api_calls += 1
-            logging.info(f"[API] Enviando dados para passagem {self.id}: {payload['readings']}")
-
-            response = requests.post(self.__class__.api_endpoint, json=payload, timeout=30, auth=self.__class__.auth)
-
-            # Verifica se a passagem ainda existe (pode ter sido removida por timeout).
-            if not self.__class__.trackings.get(self.id):
-                logging.warning(f"[API] Resposta recebida para passagem {self.id}, mas ela já foi removida.")
-                return
-    
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    api_status = data.get('status')
-                    content = data.get('content')
-
-                    if api_status == 200: # Sucesso, a API encontrou a placa.
-                        if self.api_returned_200: return # Evita processamento duplicado.
-                        
-                        self.api_returned_200 = True
-                        self.api_calls = 0
-                        correct_reading = content
-                        logging.info(f"[API] Sucesso para passagem {self.id}. Leitura correta: {correct_reading}")
-                        
-                        with self._lock:
-                            self.finalReading = correct_reading
-                            # Inicia o fechamento se estiver no modo contínuo.
-                            if self.__class__.use_continuous_tries and not self.closing:
-                                self._start_async_close()
-
-                    elif api_status == 204: # A API não encontrou a placa na base de dados.
-                        if self.api_returned_200: return
-                        self.api_calls -= 1 
-                        logging.info(f"[API] Placa não encontrada (204) para passagem {self.id}. Tentando próximas leituras.")
-                    
-                    else: # Status inesperado dentro do JSON.
-                        logging.warning(f"[API] Status interno inesperado ({api_status}) para {self.id}. Resposta: {content}")
-
-                except json.JSONDecodeError:
-                    logging.error(f"[API] Falha ao decodificar JSON para {self.id}. Resposta: {response.text}")
-            else:
-                logging.error(f"[API] Erro de comunicação para {self.id}. Status: {response.status_code}, Resposta: {response.text}")
-
-        except requests.exceptions.RequestException as e:
-            logging.error(f"[API] Falha na chamada para {self.id}: {e}")
-            if self.api_calls > 0: self.api_calls -= 1
-
-    def _update_and_call_api(self):
-        """Filtra, formata e envia as leituras para a API se houver novas candidatas."""
-        # Converte formatos de placa (ex: Mercosul para Padrão) para aumentar chances de match.
+    def setPossibleReadings(self):
         if self.__class__.format_converter:
             original_readings = list(self.readings.keys())
             converted_readings_dict = self.__class__.format_converter.convert(original_readings)
@@ -156,6 +103,66 @@ class Tracking:
         if plates_to_send:
             self.possibleReadings.extend(plates_to_send)
 
+        return plates_to_send
+
+    def _call_api_async(self, payload: dict):
+        """Envia os dados para a API externa em uma thread separada para não bloquear."""
+        if self.api_returned_200:
+            return # Se a API já deu sucesso, não envia novamente.
+
+        try:
+            self.api_calls += 1
+            self.logger.info(f"[API] Enviando dados para passagem {self.id}: {payload['readings']}")
+
+            response = requests.post(self.__class__.api_endpoint, json=payload, timeout=30, auth=self.__class__.auth)
+
+            # Verifica se a passagem ainda existe (pode ter sido removida por timeout).
+            if not self.__class__.trackings.get(self.id):
+                self.logger.warning(f"[API] Resposta recebida para passagem {self.id}, mas ela já foi removida.")
+                return
+    
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    api_status = data.get('status')
+                    content = data.get('content')
+
+                    if api_status == 200: # Sucesso, a API encontrou a placa.
+                        if self.api_returned_200: return # Evita processamento duplicado.
+                        
+                        self.api_returned_200 = True
+                        self.api_calls = 0
+                        correct_reading = content
+                        self.logger.info(f"[API] Sucesso para passagem {self.id}. Leitura correta: {correct_reading}")
+                        
+                        with self._lock:
+                            self.finalReading = correct_reading
+                            # Inicia o fechamento se estiver no modo contínuo.
+                            if self.__class__.use_continuous_tries and not self.closing:
+                                self._start_async_close()
+
+                    elif api_status == 204: # A API não encontrou a placa na base de dados.
+                        if self.api_returned_200: return
+                        self.api_calls -= 1 
+                        self.logger.info(f"[API] Placa não encontrada (204) para passagem {self.id}. Tentando próximas leituras.")
+                    
+                    else: # Status inesperado dentro do JSON.
+                        self.logger.warning(f"[API] Status interno inesperado ({api_status}) para {self.id}. Resposta: {content}")
+
+                except json.JSONDecodeError:
+                    self.logger.error(f"[API] Falha ao decodificar JSON para {self.id}. Resposta: {response.text}")
+            else:
+                self.logger.error(f"[API] Erro de comunicação para {self.id}. Status: {response.status_code}, Resposta: {response.text}")
+
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"[API] Falha na chamada para {self.id}: {e}")
+            if self.api_calls > 0: self.api_calls -= 1
+
+    def _update_and_call_api(self):
+        """Filtra, formata e envia as leituras para a API se houver novas candidatas."""
+        # Converte formatos de placa (ex: Mercosul para Padrão) para aumentar chances de match.
+        plates_to_send = self.setPossibleReadings()
+
         # Se não houver API, define a melhor leitura local e fecha a passagem.
         if not self.__class__.api_endpoint and self.possibleReadings:
             self.finalReading = self.possibleReadings[0]
@@ -174,7 +181,7 @@ class Tracking:
         """Inicia o processo de fechamento em uma thread separada para não bloquear."""
         if self.closed or self.closing: return
         self.closing = True
-        logging.info(f"Iniciando fechamento assíncrono da passagem {self.id}...")
+        self.logger.info(f"Iniciando fechamento assíncrono da passagem {self.id}...")
         threading.Thread(target=self._async_close_worker, daemon=True).start()
 
     def _async_close_worker(self):
@@ -182,12 +189,12 @@ class Tracking:
         try:
             # Aguarda a finalização de chamadas pendentes da API (com timeout).
             if self.api_calls > 0:
-                logging.info(f"Aguardando retorno da API para {self.id} (máx 30s)... ({self.api_calls} chamadas pendentes)")
+                self.logger.info(f"Aguardando retorno da API para {self.id} (máx 30s)... ({self.api_calls} chamadas pendentes)")
                 timeout_start = time.time()
                 while self.api_calls > 0 and (time.time() - timeout_start) < 30 and not self.api_returned_200:
                     time.sleep(0.1)
                 if self.api_calls > 0 and not self.api_returned_200:
-                    logging.warning(f"Timeout aguardando API para {self.id}. Prosseguindo com fechamento.")
+                    self.logger.warning(f"Timeout aguardando API para {self.id}. Prosseguindo com fechamento.")
 
             # Chama um endpoint de "fechamento" se configurado.
             if self.__class__.close_api_endpoint:
@@ -195,19 +202,19 @@ class Tracking:
 
             self._execute_final_close()
         except Exception as e:
-            logging.error(f"Erro durante fechamento assíncrono de {self.id}: {e}", exc_info=True)
+            self.logger.error(f"Erro durante fechamento assíncrono de {self.id}: {e}", exc_info=True)
             self._cleanup_tracking() # Garante a limpeza em caso de erro.
 
     def _call_close_api(self):
         """Chama o endpoint secundário de finalização de evento."""
         try:
             payload = {"instance": self.__class__.instance_id, "capture_id": self.id, "final_reading": self.finalReading}
-            logging.info(f"[API-Close] Enviando dados de fechamento para {self.id}")
+            self.logger.info(f"[API-Close] Enviando dados de fechamento para {self.id}")
             response = requests.post(self.__class__.close_api_endpoint, json=payload, timeout=30, auth=self.__class__.auth)
             if response.status_code != 200:
-                logging.error(f"[API-Close] Erro para {self.id}. Status: {response.status_code}, Resposta: {response.text}")
+                self.logger.error(f"[API-Close] Erro para {self.id}. Status: {response.status_code}, Resposta: {response.text}")
         except requests.exceptions.RequestException as e:
-            logging.error(f"[API-Close] Falha ao chamar para {self.id}: {e}")
+            self.logger.error(f"[API-Close] Falha ao chamar para {self.id}: {e}")
 
     def _execute_final_close(self):
         """Executa a lógica final de fechamento: define a leitura, salva e limpa."""
@@ -221,15 +228,18 @@ class Tracking:
             # Recalcula as leituras possíveis se ainda não foram definidas.
             if not self.possibleReadings:
                 self._update_and_call_api() # Re-executa a lógica de definição de leituras
+            else:
+                self.setPossibleReadings()
 
             if self.possibleReadings:
-                self.finalReading = self.possibleReadings[0]
+                if not self.finalReading:
+                    self.finalReading = self.possibleReadings[0]
             else:
                 self.finalReading = '...' # Marca como suspeito se nenhuma leitura válida foi encontrada.
                 is_suspect = True
 
         if not is_suspect:
-            logging.info(f"Finalizando passagem {self.id} | Duração: {(datetime.now() - self.start_time).total_seconds():.2f}s | Leitura Final: {self.finalReading}")
+            self.logger.info(f"Finalizando passagem {self.id} | Duração: {(datetime.now() - self.start_time).total_seconds():.2f}s | Leitura Final: {self.finalReading}")
             image_path = self._save_capture_image()
             if self.__class__.db_manager:
                 try:
@@ -239,9 +249,9 @@ class Tracking:
                     }
                     self.__class__.db_manager.save_tracking(tracking_data)
                 except Exception as e:
-                    logging.error(f"Erro ao salvar passagem {self.id} no banco: {e}")
+                    self.logger.error(f"Erro ao salvar passagem {self.id} no banco: {e}")
         else:
-            logging.warning(f"Passagem {self.id} marcada como suspeita.")
+            self.logger.warning(f"Passagem {self.id} marcada como suspeita.")
             self._save_capture_image(is_suspect=True)
         
         # Limpa da memória se for suspeito ou se o objeto já saiu do quadro.
@@ -251,7 +261,7 @@ class Tracking:
     def _cleanup_tracking(self):
         """Remove a instância da passagem do dicionário de rastreamentos ativos."""
         if self.__class__.trackings.pop(self.id, None):
-            logging.info(f"Passagem {self.id} removida da memória.")
+            self.logger.info(f"Passagem {self.id} removida da memória.")
 
     def _save_capture_image(self, is_suspect=False) -> str | None:
         """Escolhe o melhor frame da passagem, salva como imagem e retorna o caminho."""
@@ -260,7 +270,7 @@ class Tracking:
         if not save_dir: return None
         
         try:
-            best_frame = chooseBestFrame(self.frames, self.finalReading)
+            best_frame = chooseBestFrame(self.frames, self.logger, self.finalReading)
             if not best_frame: return None
 
             now = datetime.now()
@@ -268,15 +278,15 @@ class Tracking:
             folder_path.mkdir(parents=True, exist_ok=True)
             
             x1, y1, x2, y2 = best_frame['bounding_box']
-            filename_plate = self.finalReading if self.finalReading and self.finalReading != '...' else "SUSPEITO"
-            filename = f"{filename_plate} {best_frame['input_name']} {x1}-{y1}-{x2}-{y2} {self.id}.jpg"
+            filename_plate = self.finalReading
+            filename = f"{filename_plate} {self.instance_id} {best_frame['input_name']} {x1}-{y1}-{x2}-{y2} {self.id}.jpg"
             final_path = folder_path / filename
             
             cv2.imwrite(str(final_path), best_frame['input_frame'])
-            logging.info(f"Captura salva para {self.id} em '{final_path}'")
+            self.logger.info(f"Captura salva para {self.id} em '{final_path}'")
             return str(final_path)
         except Exception as e:
-            logging.error(f"Erro ao salvar imagem para {self.id}: {e}", exc_info=True)
+            self.logger.error(f"Erro ao salvar imagem para {self.id}: {e}", exc_info=True)
             return None
     
     # --- Métodos de Classe (Gerenciador) ---
@@ -285,8 +295,9 @@ class Tracking:
     def setup(cls, db_manager, instance_id: str, captures_save_path: str, save_suspect_detections: bool,
               suspect_detections_save_path: str, use_continuous_tries: bool, reading_formats: list, 
               readings_filter_regex: str, char_corrections: dict, max_no_frame_count: int, 
-              api_endpoint: str, api_user: str, api_password: str, close_api_endpoint: str):
+              api_endpoint: str, api_user: str, api_password: str, close_api_endpoint: str, logger: logging.Logger):
         """Configura as variáveis de classe (estado global) do gerenciador de rastreamento."""
+        cls.logger = logger
         cls.db_manager = db_manager
         cls.instance_id = instance_id
         cls.captures_save_path = Path(captures_save_path) if captures_save_path else None
@@ -298,7 +309,7 @@ class Tracking:
         cls.close_api_endpoint = close_api_endpoint
         cls.auth = (api_user, api_password) if api_user and api_password else None
 
-        cls.reading_filter_by_regex = RegexValidator(readings_filter_regex)
+        cls.reading_filter_by_regex = RegexValidator(readings_filter_regex, logger)
         cls.format_converter = FormatConverter(reading_formats, char_corrections or {}) if reading_formats else None
 
         if cls.captures_save_path: cls.captures_save_path.mkdir(parents=True, exist_ok=True)
@@ -319,7 +330,7 @@ class Tracking:
             if track.noFrameCount > cls.max_no_frame_count:
                 # Apenas loga na primeira vez que o timeout é atingido.
                 if not track.leftTheFrame:
-                    logging.info(f"Passagem {track.id} excedeu limite de frames sem detecção (timeout). Fechando...")
+                    cls.logger.info(f"Passagem {track.id} excedeu limite de frames sem detecção (timeout). Fechando...")
                     track.leftTheFrame = True
                 
                 # Inicia o fechamento se ainda não estiver em progresso.

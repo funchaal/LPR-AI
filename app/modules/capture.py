@@ -22,12 +22,6 @@ from urllib.parse import urlparse, urlunparse, quote
 # Define o nível de log do OpenCV como ERROR para suprimir mensagens de informação (ex: backend usado).
 os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
 
-# Logger configurado novamente para evitar sobrescrita do logger principal da aplicação por outras bibliotecas.
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s — %(processName)s — %(levelname)s — %(message)s"
-)
-
 # Ignora avisos específicos do OpenCV sobre dados JPEG corrompidos em streams MJPEG,
 # que podem ocorrer frequentemente e não indicam um erro fatal.
 warnings.filterwarnings("ignore", category=UserWarning, module="cv2")
@@ -38,18 +32,20 @@ class VideoSource:
 
     Atributos:
         input_endpoint (str | int): O identificador da fonte (URL, caminho do arquivo ou índice da câmera).
-        username (str, opcional): Nome de usuário para autenticação.
-        password (str, opcional): Senha para autenticação.
+        input_username (str, opcional): Nome de usuário para autenticação.
+        input_password (str, opcional): Senha para autenticação.
         timeout (int, opcional): Tempo limite em segundos para requisições HTTP.
         cap (cv2.VideoCapture): Objeto de captura do OpenCV para fontes contínuas.
         source_type (str): O tipo de fonte detectado ('camera', 'video', 'rtsp', 'http').
     """
 
-    def __init__(self, input_endpoint, username=None, password=None, timeout=3):
+    def __init__(self, logger, input_name, input_endpoint, input_username=None, input_password=None, timeout=3):
         """Inicializa o objeto VideoSource e determina o tipo de fonte."""
+        self.logger = logger
+        self.input_name = input_name
         self.input_endpoint = input_endpoint
-        self.username = username
-        self.password = password
+        self.input_username = input_username
+        self.input_password = input_password
         self.timeout = timeout
         self.cap = None
         self.source_type = self._detect_source_type()
@@ -76,21 +72,21 @@ class VideoSource:
                 if os.path.exists(self.input_endpoint):
                     return "video"  # Arquivo de vídeo local.
                 else:
-                    logging.error(f"Arquivo de vídeo não encontrado: {self.input_endpoint}")
+                    self.logger.error(f"Arquivo de vídeo não encontrado: {self.input_endpoint}")
                     return None
 
-        logging.warning(f"Tipo de fonte de vídeo não reconhecido: {self.input_endpoint}")
+        self.logger.warning(f"Tipo de fonte de vídeo não reconhecido: {self.input_endpoint}")
         return None
 
     def _inject_credentials_rtsp(self, url: str) -> str:
         """Insere credenciais de usuário e senha em uma URL RTSP de forma segura."""
-        if not (self.username and self.password and url.lower().startswith("rtsp://")):
+        if not (self.input_username and self.input_password and url.lower().startswith("rtsp://")):
             return url
 
         try:
             # Codifica caracteres especiais no usuário e senha para evitar erros na URL.
-            user_enc = quote(self.username, safe="")
-            pwd_enc = quote(self.password, safe="")
+            user_enc = quote(self.input_username, safe="")
+            pwd_enc = quote(self.input_password, safe="")
 
             # Decompõe a URL para modificar a parte de localização de rede (`netloc`).
             parsed_url = urlparse(url)
@@ -105,7 +101,7 @@ class VideoSource:
             return urlunparse(new_url_parts)
             
         except Exception as e:
-            logging.error(f"Erro ao montar a URL RTSP com credenciais: {e}")
+            self.logger.error(f"Erro ao montar a URL RTSP com credenciais: {e}")
             return url  # Retorna a URL original em caso de erro.
 
     def _init_capture(self):
@@ -114,14 +110,14 @@ class VideoSource:
         if self.source_type == "rtsp":
             endpoint_to_use = self._inject_credentials_rtsp(self.input_endpoint)
             # Loga a URL sem a senha por segurança.
-            logging.info(f"Conectando ao stream: {endpoint_to_use.replace(self.password, '*****')}")
+            self.logger.info(f"Conectando ao stream: {endpoint_to_use.replace(self.input_password, '*****')}")
 
         # Converte para int se for uma câmera, senão usa a string do endpoint.
         capture_arg = int(endpoint_to_use) if self.source_type == "camera" else endpoint_to_use
         self.cap = cv2.VideoCapture(capture_arg)
         
         if not self.cap.isOpened():
-            logging.error(f"Não foi possível abrir a fonte de vídeo: {self.input_endpoint}")
+            self.logger.error(f"Não foi possível abrir a fonte de vídeo: {self.input_endpoint}")
             self.cap = None  # Define como None para acionar a lógica de reconexão.
 
     def get_frame(self) -> np.ndarray | None:
@@ -130,7 +126,7 @@ class VideoSource:
         if self.source_type in ("video", "camera", "rtsp"):
             # Se a captura não estiver aberta, tenta reabrir.
             if self.cap is None or not self.cap.isOpened():
-                logging.warning(f"Fonte '{self.input_endpoint}' indisponível. Tentando reconectar...")
+                self.logger.warning(f"Fonte '{self.input_endpoint}' indisponível. Tentando reconectar...")
                 self.release()  # Garante a liberação de recursos antigos.
                 self._init_capture()
                 if self.cap is None:  # Se a reconexão falhar, retorna None.
@@ -143,7 +139,7 @@ class VideoSource:
         # --- Fonte de Snapshot (HTTP) ---
         elif self.source_type == "http":
             try:
-                auth = HTTPBasicAuth(self.username, self.password) if self.username else None
+                auth = HTTPBasicAuth(self.input_username, self.input_password) if self.input_username else None
                 response = requests.get(self.input_endpoint, auth=auth, timeout=self.timeout)
                 response.raise_for_status()  # Lança uma exceção para códigos de erro HTTP (4xx ou 5xx).
                 
@@ -151,7 +147,7 @@ class VideoSource:
                 return cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR)
 
             except requests.RequestException as e:
-                logging.error(f"Erro de conexão ao buscar snapshot HTTP de '{self.input_endpoint}': {e}")
+                self.logger.error(f"Erro de conexão ao buscar snapshot HTTP de '{self.input_endpoint}': {e}")
 
         return None
 
@@ -160,7 +156,7 @@ class VideoSource:
         if self.cap is not None:
             self.cap.release()
             self.cap = None
-            logging.info(f"Recurso de captura para '{self.input_endpoint}' liberado.")
+            self.logger.info(f"Recurso de captura para '{self.input_endpoint}' liberado.")
     
     def __del__(self):
         """Destrutor que garante a liberação dos recursos quando o objeto é destruído."""

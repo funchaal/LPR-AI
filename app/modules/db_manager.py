@@ -8,14 +8,15 @@ from pathlib import Path
 class CapturesDatabase:
     """Gerencia todas as operações com o banco de dados de placas."""
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, logger: logging.Logger):
         """Inicializa a conexão com o banco e cria a tabela se não existir."""
+        self.logger = logger
         try:
             os.makedirs(Path(db_path).resolve().parent, exist_ok=True)
             self.db_connection = sqlite3.connect(db_path, check_same_thread=False)
             self._create_table()
         except sqlite3.Error as e:
-            logging.error(f"Erro ao conectar ou criar tabela no banco de dados: {e}")
+            self.logger.error(f"Erro ao conectar ou criar tabela no banco de dados: {e}")
             raise
 
     def _create_table(self):
@@ -58,12 +59,12 @@ class CapturesDatabase:
                 possible_plates_json
             ))
             self.db_connection.commit()
-            logging.info(f"Dados salvos no SQLite para a passagem {tracking_data.get('id')}")
+            self.logger.info(f"Dados salvos no SQLite para a passagem {tracking_data.get('id')}")
         except sqlite3.Error as e:
-            logging.error(f"Erro ao salvar no banco SQLite: {e}")
+            self.logger.error(f"Erro ao salvar no banco SQLite: {e}")
 
     def close(self):
         """Fecha a conexão com o banco de dados."""
         if self.db_connection:
             self.db_connection.close()
-            logging.info("Conexão com o banco de dados fechada.")
+            self.logger.info("Conexão com o banco de dados fechada.")

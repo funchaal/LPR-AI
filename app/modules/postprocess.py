@@ -146,7 +146,7 @@ class RegexValidator:
     Classe para validar strings com base em uma expressão regular (regex).
     """
 
-    def __init__(self, regex_pattern: str | None):
+    def __init__(self, regex_pattern: str | None, logger: logging.Logger):
         """
         Inicializa o validador com um padrão de regex.
 
@@ -154,6 +154,7 @@ class RegexValidator:
             regex_pattern (str | None): O padrão de regex a ser usado para validação.
                                         Se for None, a validação sempre passará.
         """
+        self.logger = logger
         self.pattern_str = regex_pattern
         self.pattern = None
 
@@ -161,9 +162,9 @@ class RegexValidator:
             try:
                 # Compila o regex para um desempenho mais rápido.
                 self.pattern = re.compile(regex_pattern)
-                logging.info(f"Regex válido: {regex_pattern}")
+                self.logger.info(f"Regex válido: {regex_pattern}")
             except re.error:
-                logging.warning(f"Regex inválido fornecido: {regex_pattern}")
+                self.logger.warning(f"Regex inválido fornecido: {regex_pattern}")
                 # Se o regex for inválido, mantém o padrão como None e encerra.
                 self.pattern = None
                 exit(1)
@@ -327,7 +328,7 @@ class FormatConverter:
         return resultados
 
 
-def chooseBestFrame(frames_data: list, comparison_text: str = None) -> dict | None:
+def chooseBestFrame(frames_data: list, logger: logging.Logger, comparison_text: str = None) -> dict | None:
     """
     Seleciona o melhor frame com uma lógica de fallback progressiva.
     """
@@ -336,7 +337,7 @@ def chooseBestFrame(frames_data: list, comparison_text: str = None) -> dict | No
 
     # Se não há uma leitura final para comparação, usa o critério de centralização em todos os frames.
     if not comparison_text:
-        logging.debug(f"Sem leitura final, usando critério de centralização")
+        logger.debug(f"Sem leitura final, usando critério de centralização")
         candidate_frames = frames_data
     else:
         candidate_frames = []
@@ -349,7 +350,7 @@ def chooseBestFrame(frames_data: list, comparison_text: str = None) -> dict | No
                     if levenshtein(comparison_text, reading_text) <= max_distance:
                         candidate_frames.append(frame)
                 except Exception as e:
-                    logging.warning(f"Erro ao processar frame: {e}")
+                    logger.warning(f"Erro ao processar frame: {e}")
                     continue
 
             if candidate_frames:
@@ -358,7 +359,7 @@ def chooseBestFrame(frames_data: list, comparison_text: str = None) -> dict | No
         # Se nenhum frame for encontrado com a distância de Levenshtein,
         # usa todos os frames como candidatos.
         if not candidate_frames:
-            logging.debug(
+            logger.debug(
                 f"Nenhum frame com Levenshtein <= 4. Usando todos.")
             candidate_frames = frames_data
 
@@ -383,7 +384,7 @@ def chooseBestFrame(frames_data: list, comparison_text: str = None) -> dict | No
                 min_distance = distance
                 best_frame = frame
         except (KeyError, TypeError) as e:
-            logging.warning(f"Frame malformado: {e}")
+            logger.warning(f"Frame malformado: {e}")
             continue
 
     return best_frame

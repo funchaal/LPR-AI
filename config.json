@@ -1,8 +1,7 @@
 {
     "input_sources": {
-        "LPR01": {
-            "instance": "RTG01", 
-            "input-endpoint": "C:/Users/rafae/Documents/plate_lpr_plate_v2/plate detector/app/dev/test_content/plate_video.mp4", 
+        "CAM01": {
+            "input-endpoint": "app/dev/test_content/plate_video.mp4", 
             "input-user": "", 
             "input-password": "", 
             "polygons": []

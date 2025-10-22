@@ -11,7 +11,8 @@ import os
 
 class ONNXRecognizer:
     """Encapsula um modelo de reconhecimento de texto ONNX."""
-    def __init__(self, model_path, providers, char_dict_file):
+    def __init__(self, model_path, providers, char_dict_file, logger: logging.Logger):
+        self.logger = logger
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Arquivo do modelo de reconhecimento não encontrado: {model_path}")
         if not os.path.exists(char_dict_file):
@@ -24,7 +25,7 @@ class ONNXRecognizer:
         self.input_name = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape
         self.output_name = self.session.get_outputs()[0].name
-        logging.info(f"ONNXRecognizer usa o provider: {self.session.get_providers()[0]}")
+        self.logger.info(f"ONNXRecognizer usa o provider: {self.session.get_providers()[0]}")
 
     def _preprocess(self, img):
         expected_height = self.input_shape[2]
@@ -50,7 +51,10 @@ class ONNXRecognizer:
         last_index = 0
         for index in pred_indices:
             if index != 0 and index != last_index:
-                text += self.character_list[index]
+                try:
+                    text += self.character_list[index]
+                except IndexError:
+                    self.logger.warning(f"Índice {index} fora do intervalo para o dicionário de caracteres.")
             last_index = index
         probs = np.max(model_output[0], axis=1)
         confidence = float(np.mean(probs))
@@ -65,13 +69,14 @@ class ONNXRecognizer:
 
 class ONNXDetector:
     """Encapsula um modelo de detecção de texto ONNX (baseado em DBNet)."""
-    def __init__(self, model_path, providers):
+    def __init__(self, model_path, providers, logger: logging.Logger):
+        self.logger = logger
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Arquivo do modelo de detecção não encontrado: {model_path}")
         self.session = ort.InferenceSession(model_path, providers=providers)
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
-        logging.info(f"ONNXDetector usa o provider: {self.session.get_providers()[0]}")
+        self.logger.info(f"ONNXDetector usa o provider: {self.session.get_providers()[0]}")
         self.max_side_len = 960
         self.threshold = 0.3
         self.box_thresh = 0.6
@@ -120,10 +125,11 @@ class ONNXDetector:
 
 class OCRWrapper:
     """Wrapper que mantém a compatibilidade com a interface de predição anterior."""
-    def __init__(self, text_detector, text_recognizer, use_det=True):
+    def __init__(self, text_detector, text_recognizer, use_det=True, logger: logging.Logger = None):
         self.text_detector = text_detector
         self.text_recognizer = text_recognizer
         self.use_det = use_det
+        self.logger = logger
     
     def ocr(self, img):
         if not self.use_det:
@@ -131,7 +137,7 @@ class OCRWrapper:
                 rec_res = self.text_recognizer.predict(img)[0]
                 return [[(rec_res['rec_text'], rec_res['rec_score'])]]
             except Exception as e:
-                logging.error(f"Erro no reconhecimento ONNX (sem detecção): {e}", exc_info=True)
+                self.logger.error(f"Erro no reconhecimento ONNX (sem detecção): {e}", exc_info=True)
                 return [[]]
         
         try:
@@ -151,11 +157,11 @@ class OCRWrapper:
                     ocr_results.append(formatted_result)
             return [ocr_results] if ocr_results else [[]]
         except Exception as e:
-            logging.error(f"Erro no pipeline de OCR ONNX com detecção: {e}", exc_info=True)
+            self.logger.error(f"Erro no pipeline de OCR ONNX com detecção: {e}", exc_info=True)
             return [[]]
 
 
-def init_onnx_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict_file=None, **kwargs):
+def init_onnx_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char_dict_file=None, logger: logging.Logger = None, **kwargs):
     """
     Inicializa o motor de OCR usando ONNX Runtime, encontrando os modelos .onnx
     em uma estrutura de subdiretórios específica.
@@ -175,17 +181,17 @@ def init_onnx_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char
         onnx_subdir_path = os.path.join(base_dir, onnx_subdir_name)
 
         if not os.path.isdir(onnx_subdir_path):
-            logging.warning(f"Subdiretório ONNX esperado não foi encontrado em: {onnx_subdir_path}")
+            logger.warning(f"Subdiretório ONNX esperado não foi encontrado em: {onnx_subdir_path}")
             return None
 
         # 2. Procura pelo arquivo .onnx dentro do subdiretório
         for filename in os.listdir(onnx_subdir_path):
             if filename.endswith(".onnx"):
                 model_path = os.path.join(onnx_subdir_path, filename)
-                logging.info(f"Modelo ONNX encontrado: {model_path}")
+                logger.info(f"Modelo ONNX encontrado: {model_path}")
                 return model_path
         
-        logging.warning(f"Nenhum arquivo .onnx de modelo encontrado no diretório: {onnx_subdir_path}")
+        logger.warning(f"Nenhum arquivo .onnx de modelo encontrado no diretório: {onnx_subdir_path}")
         return None
 
     # --- Lógica Principal ---
@@ -199,7 +205,7 @@ def init_onnx_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char
         det_model_path = _find_onnx_model_path(det_model_dir)
         if not det_model_path: 
             raise RuntimeError(f"Modelo de detecção .onnx não pôde ser encontrado na estrutura de diretórios de '{det_model_dir}'")
-        text_detector = ONNXDetector(model_path=det_model_path, providers=providers)
+        text_detector = ONNXDetector(model_path=det_model_path, providers=providers, logger=logger)
 
     rec_model_path = _find_onnx_model_path(rec_model_dir)
     if not rec_model_path: 
@@ -208,8 +214,9 @@ def init_onnx_ocr(det_model_dir, rec_model_dir, use_det=True, device='cpu', char
     text_recognizer = ONNXRecognizer(
         model_path=rec_model_path, 
         providers=providers, 
-        char_dict_file=char_dict_file
+        char_dict_file=char_dict_file,
+        logger=logger
     )
     
-    logging.info("Motor de OCR ONNX inicializado com sucesso.")
-    return OCRWrapper(text_detector=text_detector, text_recognizer=text_recognizer, use_det=use_det)
+    logger.info("Motor de OCR ONNX inicializado com sucesso.")
+    return OCRWrapper(text_detector=text_detector, text_recognizer=text_recognizer, use_det=use_det, logger=logger)

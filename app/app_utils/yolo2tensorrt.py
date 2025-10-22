@@ -6,7 +6,7 @@ from ultralytics import YOLO
 # Ponto 3: Usando import relativo para robustez, buscando o config.py no diretório pai (app/)
 from app_utils.config import APP_DIR
 
-def yolo2tensorrt(yolo_model_path, output_base_dir=None):
+def yolo2tensorrt(yolo_model_path, yolo_inference_device, output_base_dir=None):
     """
     Converte modelo YOLO para TensorRT com tratamento robusto de erros.
     
@@ -46,7 +46,7 @@ def yolo2tensorrt(yolo_model_path, output_base_dir=None):
             model = YOLO(yolo_model_path)
             
             # Exporta para TensorRT com half=True para FP16
-            exported_file = model.export(format='engine', half=True, device=0)
+            exported_file = model.export(format='engine', half=True, device=yolo_inference_device)
             
             # Converte para Path se necessário
             if isinstance(exported_file, str):
