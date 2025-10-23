@@ -214,7 +214,6 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
                 # Realiza o OCR na imagem da placa processada.
                 if not settings.USE_OCR_DETECTION:
                     cropped_image = crop_margin(adjusted_image, margin_percent=settings.CROP_MARGIN)
-                    prediction = ocr.ocr(cropped_image)
                 else:
                     cropped_image = adjusted_image
 
