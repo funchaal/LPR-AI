@@ -99,11 +99,12 @@ class Tracking:
         filtered_possible = self.__class__.reading_filter_by_regex.filter_list(possible)
 
         # Determina quais placas novas devem ser enviadas para a API.
-        plates_to_send = [p for p in filtered_possible if p not in self.possibleReadings]
-        if plates_to_send:
-            self.possibleReadings.extend(plates_to_send)
+        new_possible_readings = [p for p in filtered_possible if p not in self.possibleReadings]
+        if new_possible_readings:
+            self.logger.info(f"[Tracking] Novas leituras possíveis para passagem {self.id}: {new_possible_readings}")
+            self.possibleReadings.extend(new_possible_readings)
 
-        return plates_to_send
+        return new_possible_readings
 
     def _call_api_async(self, payload: dict):
         """Envia os dados para a API externa em uma thread separada para não bloquear."""
@@ -161,17 +162,17 @@ class Tracking:
     def _update_and_call_api(self):
         """Filtra, formata e envia as leituras para a API se houver novas candidatas."""
         # Converte formatos de placa (ex: Mercosul para Padrão) para aumentar chances de match.
-        plates_to_send = self.setPossibleReadings()
+        new_possible_readings = self.setPossibleReadings()
 
         # Se não houver API, define a melhor leitura local e fecha a passagem.
         if not self.__class__.api_endpoint and self.possibleReadings:
             self.finalReading = self.possibleReadings[0]
             self._start_async_close()
         # Se houver API e novas placas, envia.
-        elif plates_to_send and self.__class__.api_endpoint:
+        elif new_possible_readings and self.__class__.api_endpoint:
             payload = {
                 "instance": self.__class__.instance_id,
-                "readings": plates_to_send,
+                "readings": new_possible_readings,
                 "created": self.start_time.isoformat(),
                 "capture_id": self.id
             }
@@ -228,18 +229,19 @@ class Tracking:
             # Recalcula as leituras possíveis se ainda não foram definidas.
             if not self.possibleReadings:
                 self._update_and_call_api() # Re-executa a lógica de definição de leituras
-            else:
-                self.setPossibleReadings()
 
             if self.possibleReadings:
                 if not self.finalReading:
-                    self.finalReading = self.possibleReadings[0]
+                    self.finalReading = self.possibleReadings[int(len(self.possibleReadings) / 2)]
             else:
                 self.finalReading = '...' # Marca como suspeito se nenhuma leitura válida foi encontrada.
                 is_suspect = True
 
         if not is_suspect:
             self.logger.info(f"Finalizando passagem {self.id} | Duração: {(datetime.now() - self.start_time).total_seconds():.2f}s | Leitura Final: {self.finalReading}")
+            self.logger.debug(f"Leituras realizadas para a passagem {self.id}: {self.readings}")
+            self.logger.debug(f"Leituras possíveis para a passagem {self.id}: {self.possibleReadings}")
+
             image_path = self._save_capture_image()
             if self.__class__.db_manager:
                 try:
@@ -264,6 +266,8 @@ class Tracking:
             self.logger.info(f"Passagem {self.id} removida da memória.")
 
     def _save_capture_image(self, is_suspect=False) -> str | None:
+        if not self.__class__.save_captures:
+            return None
         """Escolhe o melhor frame da passagem, salva como imagem e retorna o caminho."""
         if not self.frames: return None
         save_dir = self.__class__.suspect_detections_save_path if is_suspect else self.__class__.captures_save_path
@@ -292,14 +296,14 @@ class Tracking:
     # --- Métodos de Classe (Gerenciador) ---
     
     @classmethod
-    def setup(cls, db_manager, instance_id: str, captures_save_path: str, save_suspect_detections: bool,
+    def setup(cls, db_manager, instance_id: str, save_captures: bool, captures_save_path: str, save_suspect_detections: bool,
               suspect_detections_save_path: str, use_continuous_tries: bool, reading_formats: list, 
               readings_filter_regex: str, char_corrections: dict, max_no_frame_count: int, 
               api_endpoint: str, api_user: str, api_password: str, close_api_endpoint: str, logger: logging.Logger):
         """Configura as variáveis de classe (estado global) do gerenciador de rastreamento."""
-        cls.logger = logger
         cls.db_manager = db_manager
         cls.instance_id = instance_id
+        cls.save_captures = save_captures
         cls.captures_save_path = Path(captures_save_path) if captures_save_path else None
         cls.save_suspect_detections = save_suspect_detections
         cls.suspect_detections_save_path = Path(suspect_detections_save_path) if suspect_detections_save_path else None
@@ -311,6 +315,8 @@ class Tracking:
 
         cls.reading_filter_by_regex = RegexValidator(readings_filter_regex, logger)
         cls.format_converter = FormatConverter(reading_formats, char_corrections or {}) if reading_formats else None
+        
+        cls.logger = logger
 
         if cls.captures_save_path: cls.captures_save_path.mkdir(parents=True, exist_ok=True)
         if cls.suspect_detections_save_path: cls.suspect_detections_save_path.mkdir(parents=True, exist_ok=True)
@@ -326,11 +332,14 @@ class Tracking:
         for track in list(cls.trackings.values()):
             track.noFrameCount += 1
 
+            if track.noFrameCount > 1:
+                logging.debug(f"Passagem {track.id} sem detecção por {track.noFrameCount} frames.")
+
             # Verifica se a passagem excedeu o limite de frames sem detecção.
             if track.noFrameCount > cls.max_no_frame_count:
                 # Apenas loga na primeira vez que o timeout é atingido.
                 if not track.leftTheFrame:
-                    cls.logger.info(f"Passagem {track.id} excedeu limite de frames sem detecção (timeout). Fechando...")
+                    cls.logger.info(f"Passagem {track.id} excedeu limite de frames sem detecção. Fechando...")
                     track.leftTheFrame = True
                 
                 # Inicia o fechamento se ainda não estiver em progresso.

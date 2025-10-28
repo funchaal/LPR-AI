@@ -94,13 +94,18 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
     logger.info("Modelos de IA carregados com sucesso.")
 
     # Inicializa o gerenciador do banco de dados para salvar as capturas.
-    db_manager = CapturesDatabase(db_path=settings.DB_CONNECTION, logger=logger)
+    if settings.SAVE_DB:
+        db_manager = CapturesDatabase(db_path=settings.DB_CONNECTION, logger=logger)
+    else:
+        db_manager = None
+        logger.info("Salvamento em banco de dados desabilitado.")
     
     # Configura o módulo de Tracking com os parâmetros carregados das configurações.
     # O Tracking é responsável por agrupar detecções da mesma placa ao longo do tempo.
     Tracking.setup(
         db_manager=db_manager,
         instance_id=instance_id,
+        save_captures=settings.SAVE_CAPTURES,
         captures_save_path=settings.CAPTURES_SAVE_DIR,
         reading_formats=settings.READING_FORMATS,
         char_corrections=settings.CHAR_CORRECTIONS_DICT,
@@ -218,7 +223,7 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
                     cropped_image = adjusted_image
 
                 if cropped_image.shape[0] < settings.MIN_PLATE_DETECTION_HEIGHT or cropped_image.shape[1] < settings.MIN_PLATE_DETECTION_WIDTH:
-                    logger.info(f"Imagem da placa muito pequena para OCR (HxW: {cropped_image.shape[0]}x{cropped_image.shape[1]}). Ignorando.")
+                    logger.debug(f"Imagem da placa muito pequena para OCR (HxW: {cropped_image.shape[0]}x{cropped_image.shape[1]}). Ignorando.")
                     continue
 
                 resized_image = resize_with_padding(cropped_image, settings.OCR_TARGET_HEIGHT, settings.OCR_TARGET_WIDTH)
