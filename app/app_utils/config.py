@@ -89,6 +89,7 @@ class AppSettings:
     # Seção 5: Armazenamento, Logs e Banco de Dados (Apontando para o Volume)
     LOGS_SAVE_DIR: Path = field(default_factory=lambda: ROOT_DIR / os.getenv("LOGS_SAVE_DIR", "log/"))
     LOGS_SAVE_DAYS: int = field(default_factory=lambda: get_env_int("LOGS_SAVE_DAYS", 30))
+    SAVE_DB: bool = field(default_factory=lambda: get_env_bool("SAVE_DB"))
     DB_CONNECTION: Path = field(default_factory=lambda: ROOT_DIR / os.getenv("DB_CONNECTION", "db/captures.db"))
     SAVE_CAPTURES: bool = field(default_factory=lambda: get_env_bool("SAVE_CAPTURES"))
     CAPTURES_SAVE_DIR: Path = field(default_factory=lambda: get_env_path(ROOT_DIR, "CAPTURES_SAVE_DIR"))
