@@ -85,6 +85,8 @@ class AppSettings:
     STATIONARY_FRAME_THRESHOLD: int = field(default_factory=lambda: get_env_int("STATIONARY_FRAME_THRESHOLD"))
     MAX_NO_FRAME_COUNT: int = field(default_factory=lambda: get_env_int("MAX_NO_FRAME_COUNT", 10))
     USE_CONTINUOUS_TRIES: bool = field(default_factory=lambda: get_env_bool("USE_CONTINUOUS_TRIES", False))
+    SKIP_SAME_CONSECUTIVE_READING: bool = field(default_factory=lambda: get_env_bool("SKIP_SAME_CONSECUTIVE_READING", False))
+    SKIP_SAME_CONSECUTIVE_READING_TIMEOUT: int = field(default_factory=lambda: get_env_int("SKIP_SAME_CONSECUTIVE_READING_TIMEOUT", 0))
 
     # Seção 5: Armazenamento, Logs e Banco de Dados (Apontando para o Volume)
     LOGS_SAVE_DIR: Path = field(default_factory=lambda: ROOT_DIR / os.getenv("LOGS_SAVE_DIR", "log/"))

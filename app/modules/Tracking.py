@@ -40,12 +40,17 @@ class Tracking:
     captures_save_path = None
     suspect_detections_save_path = None
     use_continuous_tries = False
+    skip_same_consecutive_reading = False
+    skip_same_consecutive_reading_timeout = 0
     api_endpoint = None
     auth = None
     max_no_frame_count = 10
     reading_filter_by_regex = None
     format_converter = None
     logger = None
+
+    last_final_reading = None
+    last_final_reading_time = None
 
     # --- Métodos de Instância (para cada passagem individual) ---
 
@@ -62,6 +67,7 @@ class Tracking:
         self.closed = False                # Flag: True se a passagem foi finalizada e salva.
         self.closing = False               # Flag: True se o processo de finalização foi iniciado.
         self.leftTheFrame = False          # Flag: True se o objeto saiu do quadro (timeout).
+        self.had_same_consecutive_possible_reading = False # Flag: True se já teve a mesma leitura possível que a passagem anterior.
         self.api_calls = 0                 # Contador de chamadas de API pendentes.
         self.api_returned_200 = False      # Flag: True se a API já confirmou uma leitura.
         self._lock = threading.Lock()      # Lock para garantir a segurança em operações concorrentes.
@@ -100,8 +106,18 @@ class Tracking:
 
         # Determina quais placas novas devem ser enviadas para a API.
         new_possible_readings = [p for p in filtered_possible if p not in self.possibleReadings]
+
+        if self.__class__.skip_same_consecutive_reading and self.__class__.last_final_reading:
+            time_since_last = (self.start_time - self.__class__.last_final_reading_time).total_seconds() if self.__class__.last_final_reading_time else None
+            if (self.__class__.last_final_reading in new_possible_readings and 
+                (time_since_last is None or time_since_last < self.__class__.skip_same_consecutive_reading_timeout)):
+                self.logger.info(f"Ignorando leitura repetida '{self.__class__.last_final_reading}' para passagem {self.id} dentro do timeout.")
+                new_possible_readings.remove(self.__class__.last_final_reading)
+                self.had_same_consecutive_possible_reading = True
+
+
         if new_possible_readings:
-            self.logger.info(f"[Tracking] Novas leituras possíveis para passagem {self.id}: {new_possible_readings}")
+            self.logger.info(f"Novas leituras possíveis para passagem {self.id}: {new_possible_readings}")
             self.possibleReadings.extend(new_possible_readings)
 
         return new_possible_readings
@@ -253,8 +269,11 @@ class Tracking:
                 except Exception as e:
                     self.logger.error(f"Erro ao salvar passagem {self.id} no banco: {e}")
         else:
-            self.logger.warning(f"Passagem {self.id} marcada como suspeita.")
-            self._save_capture_image(is_suspect=True)
+            if self.had_same_consecutive_possible_reading:
+                self.logger.info(f"Passagem {self.id} desconsiderada devido a leitura repetida igual a passagem anterior.")
+            else:
+                self.logger.warning(f"Passagem {self.id} marcada como suspeita.")
+                self._save_capture_image(is_suspect=True)
         
         # Limpa da memória se for suspeito ou se o objeto já saiu do quadro.
         if is_suspect or self.leftTheFrame:
@@ -297,7 +316,7 @@ class Tracking:
     
     @classmethod
     def setup(cls, db_manager, instance_id: str, save_captures: bool, captures_save_path: str, save_suspect_detections: bool,
-              suspect_detections_save_path: str, use_continuous_tries: bool, reading_formats: list, 
+              suspect_detections_save_path: str, use_continuous_tries: bool, skip_same_consecutive_reading: bool, skip_same_consecutive_reading_timeout: int, reading_formats: list,
               readings_filter_regex: str, char_corrections: dict, max_no_frame_count: int, 
               api_endpoint: str, api_user: str, api_password: str, close_api_endpoint: str, logger: logging.Logger):
         """Configura as variáveis de classe (estado global) do gerenciador de rastreamento."""
@@ -308,6 +327,8 @@ class Tracking:
         cls.save_suspect_detections = save_suspect_detections
         cls.suspect_detections_save_path = Path(suspect_detections_save_path) if suspect_detections_save_path else None
         cls.use_continuous_tries = use_continuous_tries
+        cls.skip_same_consecutive_reading = skip_same_consecutive_reading
+        cls.skip_same_consecutive_reading_timeout = skip_same_consecutive_reading_timeout
         cls.max_no_frame_count = max_no_frame_count
         cls.api_endpoint = api_endpoint
         cls.close_api_endpoint = close_api_endpoint

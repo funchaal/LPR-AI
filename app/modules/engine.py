@@ -116,6 +116,8 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
         api_password=settings.API_PASSWORD,
         close_api_endpoint=settings.CLOSE_API_ENDPOINT,
         use_continuous_tries=settings.USE_CONTINUOUS_TRIES,
+        skip_same_consecutive_reading=settings.SKIP_SAME_CONSECUTIVE_READING,
+        skip_same_consecutive_reading_timeout=settings.SKIP_SAME_CONSECUTIVE_READING_TIMEOUT,
         save_suspect_detections=settings.SAVE_SUSPECT_DETECTIONS,
         suspect_detections_save_path=settings.SUSPECT_DETECTIONS_SAVE_DIR,
         logger=logger
@@ -141,8 +143,8 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
     # Variáveis para armazenar o estado anterior e evitar logs repetidos.
     last_plate_count = -1
     last_stationary_count = -1
-    last_ocr_text = ""
     last_was_stationary = False
+    last_ocr_text = ""
 
     # --- Loop Principal de Processamento ---
     while True:
