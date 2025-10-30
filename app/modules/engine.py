@@ -142,6 +142,7 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
     last_plate_count = -1
     last_stationary_count = -1
     last_ocr_text = ""
+    last_was_stationary = False
 
     # --- Loop Principal de Processamento ---
     while True:
@@ -184,7 +185,7 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
 
                 # Loga a contagem de leituras estacionárias se mudar.
                 if stationary_plate_tracker["stability_count"] != last_stationary_count:
-                    logger.info(f'Sequencia de leituras estacionárias: {stationary_plate_tracker["stability_count"]}')
+                    logger.debug(f'Sequencia de leituras estacionárias: {stationary_plate_tracker["stability_count"]}')
                     last_stationary_count = stationary_plate_tracker["stability_count"]
 
                 # Verifica se a detecção é estacionária para evitar processamento repetido.
@@ -194,12 +195,20 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
                     max_diff=settings.STABILITY_MAX_COORDINATE_DIFFERENCE,
                     stationary_frame_threshold=settings.STATIONARY_FRAME_THRESHOLD 
                 ):
+                    if not last_was_stationary:
+                        logger.info("Placa detectada como estacionária.")
+                        last_was_stationary = True
+
                     # Reseta o contador de "sem frame" para o tracking atual, se existir.
                     if current_track and Tracking.trackings.get(current_track.id) is not None:
                         Tracking.trackings.get(current_track.id).noFrameCount = 0
 
                     logger.debug(f"Placa estacionária detectada. Ignorando.")
                     continue
+                else:
+                    if last_was_stationary:
+                        logger.info("Placa não está mais estacionária.")
+                        last_was_stationary = False
 
                 # Lógica para iniciar um novo tracking se o anterior foi fechado após chamada de API.
                 if current_track and Tracking.trackings.get(current_track.id) is not None and Tracking.trackings.get(current_track.id).closing and Tracking.trackings.get(current_track.id).api_calls > 0:
