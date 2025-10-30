@@ -124,7 +124,7 @@ class Tracking:
                 or not self.__class__.skip_same_consecutive_reading_timeout
             ):
                 self.logger.info(
-                    f"Ignorando leitura repetida '{self.__class__.last_final_reading}' para passagem {self.id}."
+                    f"Leituras possíveis iguais as da passagem anterior detectadas. Ignorando."
                 )
                 
                 # <<< LINHA CORRIGIDA AQUI >>>
@@ -279,6 +279,7 @@ class Tracking:
             self.logger.debug(f"Leituras possíveis para a passagem {self.id}: {self.possibleReadings}")
 
             self.__class__.last_possible_readings = self.possibleReadings.copy()
+            self.__class__.last_possible_readings_time = datetime.now()
 
             image_path = self._save_capture_image()
             if self.__class__.db_manager:
