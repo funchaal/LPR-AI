@@ -50,7 +50,7 @@ class Tracking:
     logger = None
 
     last_possible_readings = []
-    last_possible_readings_timeout = None
+    last_possible_readings_time = None
 
     # --- Métodos de Instância (para cada passagem individual) ---
 
@@ -109,8 +109,8 @@ class Tracking:
 
         if self.__class__.skip_same_consecutive_reading and self.__class__.last_possible_readings:
             time_since_last = (
-                (self.start_time - self.__class__.last_possible_readings_timeout).total_seconds()
-                if self.__class__.last_possible_readings_timeout else None
+                (self.start_time - self.__class__.last_possible_readings_time).total_seconds()
+                if self.__class__.last_possible_readings_time else None
             )
 
             # Verifica se há interseção entre as listas
@@ -121,12 +121,19 @@ class Tracking:
             if has_common_reading and (
                 time_since_last is None
                 or time_since_last < self.__class__.skip_same_consecutive_reading_timeout
+                or not self.__class__.skip_same_consecutive_reading_timeout
             ):
                 self.logger.info(
-                    f"Ignorando leitura repetida '{self.__class__.last_final_reading}' para passagem {self.id} dentro do timeout."
+                    f"Ignorando leitura repetida '{self.__class__.last_final_reading}' para passagem {self.id}."
                 )
-                if self.__class__.last_final_reading in new_possible_readings:
-                    new_possible_readings.remove(self.__class__.last_final_reading)
+                
+                # <<< LINHA CORRIGIDA AQUI >>>
+                # Remove de new_possible_readings todos os itens que também estão na lista de leituras anteriores.
+                new_possible_readings = [
+                    r for r in new_possible_readings 
+                    if r not in self.__class__.last_possible_readings
+                ]
+                
                 self.had_same_consecutive_possible_reading = True
 
         if new_possible_readings:
