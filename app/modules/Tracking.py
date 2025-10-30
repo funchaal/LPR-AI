@@ -49,8 +49,8 @@ class Tracking:
     format_converter = None
     logger = None
 
-    last_final_reading = None
-    last_final_reading_time = None
+    last_possible_readings = []
+    last_possible_readings_timeout = None
 
     # --- Métodos de Instância (para cada passagem individual) ---
 
@@ -107,14 +107,27 @@ class Tracking:
         # Determina quais placas novas devem ser enviadas para a API.
         new_possible_readings = [p for p in filtered_possible if p not in self.possibleReadings]
 
-        if self.__class__.skip_same_consecutive_reading and self.__class__.last_final_reading:
-            time_since_last = (self.start_time - self.__class__.last_final_reading_time).total_seconds() if self.__class__.last_final_reading_time else None
-            if (self.__class__.last_final_reading in new_possible_readings and 
-                (time_since_last is None or time_since_last < self.__class__.skip_same_consecutive_reading_timeout)):
-                self.logger.info(f"Ignorando leitura repetida '{self.__class__.last_final_reading}' para passagem {self.id} dentro do timeout.")
-                new_possible_readings.remove(self.__class__.last_final_reading)
-                self.had_same_consecutive_possible_reading = True
+        if self.__class__.skip_same_consecutive_reading and self.__class__.last_possible_readings:
+            time_since_last = (
+                (self.start_time - self.__class__.last_possible_readings_timeout).total_seconds()
+                if self.__class__.last_possible_readings_timeout else None
+            )
 
+            # Verifica se há interseção entre as listas
+            has_common_reading = any(
+                r in self.__class__.last_possible_readings for r in new_possible_readings
+            )
+
+            if has_common_reading and (
+                time_since_last is None
+                or time_since_last < self.__class__.skip_same_consecutive_reading_timeout
+            ):
+                self.logger.info(
+                    f"Ignorando leitura repetida '{self.__class__.last_final_reading}' para passagem {self.id} dentro do timeout."
+                )
+                if self.__class__.last_final_reading in new_possible_readings:
+                    new_possible_readings.remove(self.__class__.last_final_reading)
+                self.had_same_consecutive_possible_reading = True
 
         if new_possible_readings:
             self.logger.info(f"Novas leituras possíveis para passagem {self.id}: {new_possible_readings}")
@@ -257,6 +270,8 @@ class Tracking:
             self.logger.info(f"Finalizando passagem {self.id} | Duração: {(datetime.now() - self.start_time).total_seconds():.2f}s | Leitura Final: {self.finalReading}")
             self.logger.debug(f"Leituras realizadas para a passagem {self.id}: {self.readings}")
             self.logger.debug(f"Leituras possíveis para a passagem {self.id}: {self.possibleReadings}")
+
+            self.__class__.last_possible_readings = self.possibleReadings.copy()
 
             image_path = self._save_capture_image()
             if self.__class__.db_manager:
