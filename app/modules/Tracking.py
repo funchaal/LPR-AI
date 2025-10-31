@@ -268,7 +268,8 @@ class Tracking:
 
             if self.possibleReadings:
                 if not self.finalReading:
-                    self.finalReading = self.possibleReadings[int(len(self.possibleReadings) / 2)]
+                    # self.finalReading = self.possibleReadings[int(len(self.possibleReadings) / 2)]
+                    self.finalReading = self.possibleReadings[-1]
             else:
                 self.finalReading = '...' # Marca como suspeito se nenhuma leitura válida foi encontrada.
                 is_suspect = True
