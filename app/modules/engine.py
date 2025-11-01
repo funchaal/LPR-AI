@@ -25,7 +25,7 @@ from app_utils.config import settings
 # evitando erros de inicialização duplicada da biblioteca KMP.
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-def process_source(logger, input_name: str, input_endpoint: str, input_username: str, input_password: str, polygons: list):
+def process_source(logger, input_name: str, input_endpoint: str, input_username: str, input_password: str, visible_polygons: list):
     """
     Processa uma única fonte de vídeo, desde a captura até a análise e salvamento.
     Esta função contém o loop principal de processamento de frames.
@@ -35,7 +35,7 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
         instance_id (str): ID da instância de captura.
         input_name (str): Nome amigável da fonte de entrada.
         input_endpoint (str): URL/caminho da fonte de vídeo.
-        polygons (list): Lista de polígonos para mascarar a área de detecção.
+        visible_polygons (list): Lista de polígonos para mascarar a área de detecção.
         yolo: Objeto do modelo YOLO para detecção de placas.
         ocr: Objeto do modelo OCR para reconhecimento de caracteres.
         yolo_inference_device (str): Dispositivo para inferência do YOLO (ex: 'cpu', 'cuda:0').
@@ -163,7 +163,7 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
                 break
 
         # Aplica a máscara polígonal no frame, se houver polígonos definidos.
-        processed_frame = draw_polygonal_mask(frame, polygons)
+        processed_frame = draw_polygonal_mask(frame, visible_polygons)
         
         # Informa ao módulo de Tracking que um novo frame chegou para gerenciar timeouts.
         Tracking.newFrame()
@@ -303,8 +303,8 @@ def process_source(logger, input_name: str, input_endpoint: str, input_username:
             display_frame = frame.copy()
 
             # Desenha os polígonos de máscara na imagem de exibição.
-            if polygons:
-                polygon_pts = [np.array(p, dtype=np.int32) for p in polygons]
+            if visible_polygons:
+                polygon_pts = [np.array(p, dtype=np.int32) for p in visible_polygons]
                 cv2.polylines(display_frame, polygon_pts, isClosed=True, color=(0, 255, 0), thickness=2)
 
             # Exibe o valor de FPS na tela.
