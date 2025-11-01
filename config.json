@@ -4,7 +4,7 @@
             "input-endpoint": "app/dev/test_content/plate_video.mp4", 
             "input-user": "", 
             "input-password": "", 
-            "polygons": []
+            "visible-polygons": []
           }
     }
 }
