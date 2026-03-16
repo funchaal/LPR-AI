@@ -1,4 +1,4 @@
-# Documentação Técnica do Sistema de LPR-AI RTG
+# Documentação Técnica do Sistema de LPR-AI
 
 **Autor:** Rafael Funchal  
 **Data:** 22 de outubro de 2025
